@@ -88,6 +88,9 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseDraft: true
+          # latest.json is assembled by the publish job once both platforms are
+          # up — letting each job merge it here would race when run in parallel.
+          includeUpdaterJson: false
           args: --bundles app,dmg
 
       - name: Clean up keychain
@@ -97,10 +100,7 @@ jobs:
             security delete-keychain "${KEYCHAIN_PATH}" || true
           fi
 
-  # Runs AFTER the macOS job (not in parallel) so the two tauri-action runs
-  # can't race while merging their platforms into the release's latest.json.
   release-windows:
-    needs: release-macos
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -133,16 +133,47 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseDraft: true
+          includeUpdaterJson: false
           args: --bundles nsis
 
-  # Publish only once BOTH platforms' assets (and the merged latest.json) are
-  # attached — the draft window prevents the updater/latest API from seeing a
-  # release whose assets are still uploading.
+  # Assemble latest.json from both platforms' .sig assets, then publish. Runs
+  # only once BOTH build jobs are done — the draft window prevents the updater/
+  # latest API from seeing a release whose assets are still uploading.
   publish:
     needs: [release-macos, release-windows]
     runs-on: ubuntu-latest
     steps:
-      - name: Publish release as latest
+      - name: Assemble latest.json and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --repo "${GITHUB_REPOSITORY}"
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir assets && cd assets
+          gh release download "$TAG" --repo "$REPO" --pattern '*.sig'
+
+          mac_sig_file=$(ls *.app.tar.gz.sig)
+          win_sig_file=$(ls *-setup.exe.sig 2>/dev/null || ls *.nsis.zip.sig)
+          base="https://github.com/$REPO/releases/download/$TAG"
+
+          jq -n \
+            --arg version "${TAG#v}" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg mac_sig "$(cat "$mac_sig_file")" \
+            --arg mac_url "$base/${mac_sig_file%.sig}" \
+            --arg win_sig "$(cat "$win_sig_file")" \
+            --arg win_url "$base/${win_sig_file%.sig}" \
+            '{
+              version: $version,
+              notes: "",
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $mac_sig, url: $mac_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
+              }
+            }' > latest.json
+          cat latest.json
+
+          gh release upload "$TAG" latest.json --clobber --repo "$REPO"
+          gh release edit "$TAG" --draft=false --latest --repo "$REPO"
