@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/swift/TeilCapture/.build/
+*.log
+.DS_Store

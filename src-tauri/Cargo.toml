@@ -1,0 +1,61 @@
+[package]
+name = "teil-ing-crossplatform"
+version = "0.1.0"
+description = "Cross-platform teil.ing screenshot client"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "teil_ing_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Builds and links the TeilCapture Swift package (swift/TeilCapture) on macOS.
+# Host-gated: build-dependencies in [target] tables resolve against the HOST platform.
+[target.'cfg(target_os = "macos")'.build-dependencies]
+swift-rs = { version = "1", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+# Browser sign-in: teiling://connect callbacks. single-instance (deep-link feature)
+# forwards scheme launches on Windows to the running instance.
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# Signed in-place auto-updates from GitHub releases (latest.json).
+tauri-plugin-updater = "2"
+
+# PKCE bits for the browser connect flow (Swift: AuthService).
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.22"
+url = "2"
+whoami = "1"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+
+# Shared image type + PNG codec (same crate/version xcap re-exports, so types unify).
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# OS keychain: macOS Keychain + Windows Credential Manager.
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+
+anyhow = "1"
+
+# Screen/window still-capture on non-macOS platforms (WGC on Windows).
+# macOS capture is fully native: the TeilCapture Swift library (swift/TeilCapture).
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+xcap = "0.9"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -1,0 +1,591 @@
+/* Visual parity with the macOS popover: 320px card, system fonts, subtle dividers,
+   accent hover highlight, light/dark via prefers-color-scheme. */
+
+:root {
+  --width: 320px;
+  --accent: #0a84ff;
+  --bg: #ececec;
+  --card: #f6f6f6;
+  --text: #1d1d1f;
+  --secondary: #6e6e73;
+  --tertiary: #9a9a9f;
+  --divider: rgba(0, 0, 0, 0.08);
+  --hover: rgba(10, 132, 255, 0.14);
+  --danger: #ff3b30;
+  --success: #34c759;
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --card: #2a2a2c;
+    --text: #f5f5f7;
+    --secondary: #98989d;
+    --tertiary: #6e6e73;
+    --divider: rgba(255, 255, 255, 0.1);
+    --hover: rgba(10, 132, 255, 0.28);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+html,
+body {
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* Transparent window; the card draws the rounded, shadowed popover surface. */
+body.popover {
+  background: transparent;
+  padding: 8px;
+}
+
+.card {
+  width: var(--width);
+  background: var(--card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.divider {
+  height: 1px;
+  background: var(--divider);
+}
+
+.section {
+  padding: 8px 0 4px;
+}
+
+.section-label {
+  font-size: 11px;
+  color: var(--secondary);
+  padding: 0 12px 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: default;
+  border-radius: 6px;
+  margin: 0 6px;
+}
+.row:hover {
+  background: var(--hover);
+}
+.row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.row .shortcut {
+  font-size: 11px;
+  color: var(--tertiary);
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--secondary);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 5px;
+  display: inline-flex;
+  line-height: 0;
+}
+.icon-btn:hover {
+  background: var(--divider);
+  color: var(--text);
+}
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  /* Some icon paths (gear) stroke right up to the viewBox edge — don't clip them. */
+  overflow: visible;
+}
+
+/* Icons used outside .icon-btn (banners, permission gate) need explicit sizing —
+   a bare <svg> with only a viewBox inflates to its container width. */
+.banner .line svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.gate-icon {
+  color: var(--danger);
+}
+.gate-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* Capture buttons */
+.capture-row {
+  cursor: pointer;
+}
+.capture-row .label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* History */
+.history-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 4px;
+  font-size: 11px;
+  color: var(--secondary);
+}
+.history-header .grow {
+  flex: 1;
+}
+.history-list {
+  max-height: 330px;
+  overflow-y: auto;
+}
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin: 0 6px;
+  border-radius: 6px;
+}
+.history-row:hover {
+  background: var(--hover);
+}
+.thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--divider);
+  flex: none;
+}
+.thumb.lg {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+}
+.meta {
+  flex: 1;
+  min-width: 0;
+}
+.meta .time {
+  font-size: 11px;
+  color: var(--secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.meta .views {
+  font-size: 10px;
+  color: var(--tertiary);
+}
+.badge {
+  font-size: 10px;
+  color: var(--secondary);
+}
+.empty {
+  text-align: center;
+  color: var(--tertiary);
+  padding: 20px 0;
+}
+.empty .big {
+  font-size: 22px;
+}
+
+/* Footer */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--divider);
+}
+.footer .grow {
+  flex: 1;
+}
+.update-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--success);
+  font-size: 11px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 5px;
+}
+.update-pill:hover {
+  background: var(--divider);
+}
+.update-pill svg {
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+}
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.text-btn:hover {
+  color: var(--text);
+}
+
+/* Error banners */
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 59, 48, 0.09);
+  color: var(--danger);
+  font-size: 12px;
+}
+.banner .line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Quota */
+.quota {
+  padding: 6px 12px;
+}
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--divider);
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.quota .line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--secondary);
+  margin-top: 4px;
+}
+.chip {
+  font-size: 10px;
+  color: var(--secondary);
+  background: var(--divider);
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+/* Buttons / forms (preferences, onboarding, detail) */
+.pane {
+  padding: 16px;
+}
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.pane-header .back {
+  position: absolute;
+  left: 0;
+  color: var(--secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+h3.sec {
+  font-size: 14px;
+  margin: 12px 0 6px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.field label {
+  font-size: 11px;
+  color: var(--secondary);
+}
+input[type="text"],
+input[type="password"] {
+  font: inherit;
+  padding: 5px 8px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+.toggle-row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.toggle-row .grow code {
+  overflow-wrap: anywhere;
+}
+.toggle-row .sub {
+  font-size: 11px;
+  color: var(--secondary);
+}
+button.primary {
+  font: inherit;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.bordered {
+  font: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button.danger {
+  color: var(--danger);
+}
+.error-text {
+  color: var(--danger);
+  font-size: 11px;
+}
+.center {
+  text-align: center;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--divider);
+  border-top-color: var(--secondary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* macOS-style switch */
+.switch {
+  position: relative;
+  width: 36px;
+  height: 21px;
+  flex: none;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch .slider {
+  position: absolute;
+  inset: 0;
+  background: var(--tertiary);
+  border-radius: 999px;
+  transition: 0.15s;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  left: 2px;
+  top: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: 0.15s;
+}
+.switch input:checked + .slider {
+  background: var(--success);
+}
+.switch input:checked + .slider::before {
+  transform: translateX(15px);
+}
+
+/* ---- Settings window (standalone decorated dialog) ---- */
+body.prefs {
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+}
+.prefs-body {
+  padding: 0;
+}
+
+/* Tab bar */
+.tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 10px 12px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.tab {
+  background: none;
+  border: none;
+  font: inherit;
+  color: var(--secondary);
+  padding: 6px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.tab-content {
+  padding: 8px 18px 18px;
+}
+
+/* Shortcuts read as native keycaps (⌃⌥⇧⌘X) — larger and clearer than the popover hint. */
+.prefs-body .shortcut {
+  font-size: 14px;
+  color: var(--secondary);
+  min-width: 40px;
+  text-align: right;
+}
+
+/* Segmented control (URL / Image clipboard picker) */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.segmented .seg {
+  background: var(--bg);
+  border: none;
+  padding: 4px 14px;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.segmented .seg + .seg {
+  border-left: 1px solid var(--divider);
+}
+.segmented .seg.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- Capture overlay ---- */
+body.overlay-body {
+  background: transparent;
+  overflow: hidden;
+  cursor: crosshair;
+}
+#overlay-root {
+  position: fixed;
+  inset: 0;
+}
+.dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+}
+.selection {
+  position: fixed;
+  border: 1.5px dashed #fff;
+  background: rgba(10, 132, 255, 0.12);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
+}
+.dimension-label {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* Window select (macOS-style hover-highlight) */
+.dim-full {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+}
+.win-highlight {
+  position: fixed;
+  border: 2px solid var(--accent);
+  background: rgba(10, 132, 255, 0.1);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+}
+.win-label {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  pointer-events: none;
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.win-outline {
+  position: fixed;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+.win-debug {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  pointer-events: none;
+}
