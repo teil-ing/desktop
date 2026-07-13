@@ -256,27 +256,35 @@ fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>) {
     }
 }
 
-/// Place the popover near the tray click, clamped on-screen. Approximate; the tray sits at
-/// the top on macOS and bottom-right on Windows, so this flips above/below the click.
+/// Place the popover near the tray click, on the monitor the click happened on,
+/// clamped to that monitor's bounds. The tray sits at the top on macOS and
+/// bottom-right on Windows, so this flips above/below the click. All physical px.
 fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>) {
     let size = win.outer_size().unwrap_or(PhysicalSize::new(336, 560));
+    let (w, h) = (size.width as i32, size.height as i32);
     let click_x = click.x as i32;
     let click_y = click.y as i32;
-    let (mw, mh) = win
-        .current_monitor()
+
+    // current_monitor() is unreliable for a still-hidden window (None → a 1920x1080
+    // fallback that dragged the popover toward screen-center on larger displays, and
+    // it ignored the monitor origin on multi-monitor setups). Locate the monitor
+    // from the click point instead.
+    let (mx, my, mw, mh) = win
+        .monitor_from_point(click.x, click.y)
         .ok()
         .flatten()
-        .map(|m| (m.size().width as i32, m.size().height as i32))
-        .unwrap_or((1920, 1080));
+        .or_else(|| win.primary_monitor().ok().flatten())
+        .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
+        .unwrap_or((0, 0, 1920, 1080));
 
-    let mut x = click_x - size.width as i32 / 2;
-    x = x.clamp(8, (mw - size.width as i32 - 8).max(8));
+    let mut x = click_x - w / 2;
+    x = x.clamp(mx + 8, (mx + mw - w - 8).max(mx + 8));
 
     // If the click is in the bottom half of the display (Windows tray), open above it.
-    let y = if click_y > mh / 2 {
-        (click_y - size.height as i32 - 8).max(8)
+    let y = if click_y > my + mh / 2 {
+        (click_y - h - 8).max(my + 8)
     } else {
-        (click_y + 8).min((mh - size.height as i32 - 8).max(8))
+        (click_y + 8).min((my + mh - h - 8).max(my + 8))
     };
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }

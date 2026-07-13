@@ -496,8 +496,10 @@ pub fn hide_popover(app: AppHandle) {
 }
 
 /// Open (or focus) the Settings window — a real decorated dialog, not the in-popover pane.
+/// MUST be async: on Windows, building a webview window from a synchronous command
+/// stalls WebView2 initialization (the window opens but stays white).
 #[tauri::command]
-pub fn open_preferences(app: AppHandle) -> Result<(), String> {
+pub async fn open_preferences(app: AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("preferences") {
         let _ = win.show();
         let _ = win.set_focus();

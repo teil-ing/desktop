@@ -78,8 +78,27 @@ pub struct ImageUpdateRequest {
 
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(30))
         .build()?)
+}
+
+/// Deepest source of a transport error — the actual DNS/TLS/OS cause, which
+/// reqwest's own Display hides behind "error sending request".
+fn root_cause(e: &dyn std::error::Error) -> String {
+    let mut cur = e;
+    while let Some(s) = cur.source() {
+        cur = s;
+    }
+    cur.to_string()
+}
+
+fn reach_error(e: reqwest::Error) -> anyhow::Error {
+    if e.is_timeout() {
+        anyhow!("Connection to teil.ing timed out.")
+    } else {
+        anyhow!("Could not reach teil.ing ({}).", root_cause(&e))
+    }
 }
 
 /// Map non-2xx status codes to messages mirroring the Swift APIError strings.
@@ -100,7 +119,7 @@ pub async fn validate(key: &str) -> Result<bool> {
         .header("X-API-Key", key)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing. Check your connection."))?;
+        .map_err(reach_error)?;
     match resp.status().as_u16() {
         200 => Ok(true),
         401 | 403 => Ok(false),
@@ -114,7 +133,7 @@ pub async fn list_images(key: &str, limit: i64, offset: i64) -> Result<ImageList
         .header("X-API-Key", key)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing"))?;
+        .map_err(reach_error)?;
     let code = resp.status().as_u16();
     if !(200..300).contains(&code) {
         return Err(status_error(code));
@@ -128,7 +147,7 @@ pub async fn get_quota(key: &str) -> Result<QuotaResponse> {
         .header("X-API-Key", key)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing"))?;
+        .map_err(reach_error)?;
     let code = resp.status().as_u16();
     if !(200..300).contains(&code) {
         return Err(status_error(code));
@@ -142,7 +161,7 @@ pub async fn get_image_details(key: &str, id: &str) -> Result<ImageResponse> {
         .header("X-API-Key", key)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing"))?;
+        .map_err(reach_error)?;
     let code = resp.status().as_u16();
     if !(200..300).contains(&code) {
         return Err(status_error(code));
@@ -157,7 +176,7 @@ pub async fn update_image(key: &str, id: &str, update: &ImageUpdateRequest) -> R
         .json(update)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing"))?
+        .map_err(reach_error)?
         .status()
         .as_u16();
     if (200..300).contains(&code) {
@@ -173,7 +192,7 @@ pub async fn delete_image(key: &str, id: &str) -> Result<()> {
         .header("X-API-Key", key)
         .send()
         .await
-        .map_err(|_| anyhow!("Could not reach teil.ing"))?
+        .map_err(reach_error)?
         .status()
         .as_u16();
     if (200..300).contains(&code) {
@@ -198,13 +217,24 @@ pub async fn upload(key: &str, png: Vec<u8>, strip_exif: bool, is_private: bool)
         form = form.text("private", "true");
     }
 
-    let resp = client()?
+    // Uploads get their own client: the shared 30s total timeout is too tight for
+    // multi-megabyte PNGs on slow uplinks (surfaced as spurious "could not reach").
+    let resp = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?
         .post(format!("{BASE}/upload"))
         .header("X-API-Key", key)
         .multipart(form)
         .send()
         .await
-        .map_err(|_| anyhow!("Upload failed: could not reach teil.ing"))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                anyhow!("Upload timed out. Check your connection speed.")
+            } else {
+                anyhow!("Upload failed: could not reach teil.ing ({}).", root_cause(&e))
+            }
+        })?;
 
     match resp.status().as_u16() {
         201 => {
