@@ -9,10 +9,12 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::api::{self, ImageListResponse, ImageResponse, ImageUpdateRequest, QuotaResponse};
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use crate::capture::{self, WindowInfo};
 #[cfg(target_os = "macos")]
 use crate::capture_macos;
+#[cfg(target_os = "windows")]
+use crate::capture_windows;
 use crate::prefs::{self, Prefs};
 use crate::{secure, AppState};
 
@@ -132,41 +134,47 @@ pub fn reset_shortcuts(app: AppHandle, state: State<AppState>) {
 
 // ---- Capture flows -------------------------------------------------------
 //
-// macOS: fully native (TeilCapture Swift library) — one blocking call runs the
-// selection overlay + ScreenCaptureKit capture + flash/sound and returns a PNG.
-// Other platforms: HTML overlay (overlay.html) + xcap, as before.
+// macOS + Windows: fully native (TeilCapture Swift library / teil-capture-windows
+// Win32 overlay) — one blocking call runs the selection overlay + capture and
+// returns a PNG. Other platforms: HTML overlay (overlay.html) + xcap, as before.
 
 /// Runs a native interactive capture off the async runtime, then feeds the
 /// existing upload pipeline. Mode: "region" | "window" | "fullscreen".
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn spawn_native_capture(app: AppHandle, mode: &'static str) {
     // Without the TCC grant every capture fails — surface the popover (which is
     // parked on the blocking permission screen) instead of starting the overlay.
+    #[cfg(target_os = "macos")]
     if !capture_macos::has_screen_permission() {
         eprintln!("[teil.ing] capture blocked: screen recording permission missing");
         show_main(&app);
         return;
     }
     tauri::async_runtime::spawn(async move {
-        match blocking(move || capture_macos::capture_interactive(mode)).await {
+        #[cfg(target_os = "macos")]
+        let run = move || capture_macos::capture_interactive(mode);
+        #[cfg(target_os = "windows")]
+        let run = move || capture_windows::capture_interactive(mode);
+        match blocking(run).await {
             Ok(Some(png)) => match image::load_from_memory(&png) {
                 Ok(img) => upload_capture(app, img.to_rgba8(), Some(png)).await,
                 Err(e) => report_failure(&app, &format!("Capture failed: {e}")),
             },
             Ok(None) => {} // user cancelled — no capture, no feedback
-            Err(e) => {
-                // A missing TCC grant is the most common failure — say so explicitly.
-                if !capture_macos::has_screen_permission() {
-                    report_failure(
-                        &app,
-                        "Screen Recording permission is required. Grant it in System Settings → Privacy & Security, then restart the app.",
-                    );
-                } else {
-                    report_failure(&app, &format!("Capture failed: {e}"));
-                }
-            }
+            Err(e) => report_failure(&app, &native_error_message(&e)),
         }
     });
+}
+
+/// Failure text for the native capture path. On macOS a missing TCC grant is the
+/// most common failure — say so explicitly.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn native_error_message(e: &str) -> String {
+    #[cfg(target_os = "macos")]
+    if !capture_macos::has_screen_permission() {
+        return "Screen Recording permission is required. Grant it in System Settings → Privacy & Security, then restart the app.".into();
+    }
+    format!("Capture failed: {e}")
 }
 
 /// Mode + virtual-desktop origin the overlay should use (set by open_overlay just before
@@ -188,12 +196,12 @@ pub fn overlay_mode(state: State<AppState>) -> OverlayInfo {
 
 #[tauri::command]
 pub fn begin_region_capture(app: AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         spawn_native_capture(app, "region");
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         crate::open_overlay(&app, "region").map_err(|e| e.to_string())
     }
@@ -201,12 +209,12 @@ pub fn begin_region_capture(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn begin_window_capture(app: AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         spawn_native_capture(app, "window");
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         crate::open_overlay(&app, "window").map_err(|e| e.to_string())
     }
@@ -258,8 +266,8 @@ pub fn relaunch_app(app: AppHandle) {
     app.restart();
 }
 
-// Fields are only read by the non-macOS overlay flow; macOS keeps the stub signature.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+// Fields are only read by the HTML-overlay flow; native platforms keep the stub signature.
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 #[derive(Deserialize)]
 pub struct Region {
     pub x: f64,
@@ -268,14 +276,14 @@ pub struct Region {
     pub height: f64,
 }
 
-/// Not used on macOS — the native overlay finishes its own capture.
-#[cfg(target_os = "macos")]
+/// Not used on macOS/Windows — the native overlay finishes its own capture.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn finish_region_capture(_app: AppHandle, _region: Option<Region>) -> Result<(), String> {
-    Err("Region capture is handled natively on macOS.".into())
+    Err("Region capture is handled natively on this platform.".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 pub async fn finish_region_capture(app: AppHandle, region: Option<Region>) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window("overlay") {
@@ -310,27 +318,27 @@ pub async fn finish_region_capture(app: AppHandle, region: Option<Region>) -> Re
     Ok(())
 }
 
-/// Not used on macOS — the native picker enumerates windows itself.
-#[cfg(target_os = "macos")]
+/// Not used on macOS/Windows — the native picker enumerates windows itself.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn list_windows() -> Result<Vec<serde_json::Value>, String> {
-    Err("Window selection is handled natively on macOS.".into())
+    Err("Window selection is handled natively on this platform.".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 pub async fn list_windows() -> Result<Vec<WindowInfo>, String> {
     blocking(|| capture::list_windows().map_err(|e| e.to_string())).await
 }
 
-/// Not used on macOS — the native picker captures the clicked window itself.
-#[cfg(target_os = "macos")]
+/// Not used on macOS/Windows — the native picker captures the clicked window itself.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn capture_window(_app: AppHandle, _window_id: u32) -> Result<(), String> {
-    Err("Window capture is handled natively on macOS.".into())
+    Err("Window capture is handled natively on this platform.".into())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[tauri::command]
 pub async fn capture_window(app: AppHandle, window_id: u32) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window("overlay") {
@@ -349,12 +357,12 @@ pub async fn capture_window(app: AppHandle, window_id: u32) -> Result<(), String
     Ok(())
 }
 
-/// Fullscreen capture, then upload. Native (display under cursor) on macOS;
-/// xcap primary display elsewhere.
+/// Fullscreen capture, then upload. Native on macOS (display under cursor) and
+/// Windows (primary display); xcap primary display elsewhere.
 pub fn spawn_fullscreen(app: AppHandle) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     spawn_native_capture(app, "fullscreen");
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     tauri::async_runtime::spawn(async move {
         match blocking(|| capture::capture_primary().map_err(|e| e.to_string())).await {
             Ok(cap) => upload_capture(app, cap.image, None).await,

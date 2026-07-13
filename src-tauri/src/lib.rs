@@ -3,10 +3,12 @@
 
 mod api;
 mod auth;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod capture;
 #[cfg(target_os = "macos")]
 mod capture_macos;
+#[cfg(target_os = "windows")]
+mod capture_windows;
 mod commands;
 mod prefs;
 mod secure;
@@ -20,7 +22,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent,
 };
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use tauri::{LogicalPosition, LogicalSize, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -297,9 +299,10 @@ pub fn trigger_capture(app: &AppHandle, mode: &str) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        // Fully native flows (TeilCapture Swift library) — no HTML overlay.
+        // Fully native flows (macOS: TeilCapture Swift library; Windows:
+        // teil-capture-windows Win32 overlay) — no HTML overlay.
         let mode: &'static str = match mode {
             "region" => "region",
             "window" => "window",
@@ -308,7 +311,7 @@ pub fn trigger_capture(app: &AppHandle, mode: &str) {
         };
         commands::spawn_native_capture(app.clone(), mode);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     match mode {
         "region" => {
             let _ = open_overlay(app, "region");
@@ -322,8 +325,9 @@ pub fn trigger_capture(app: &AppHandle, mode: &str) {
 }
 
 /// Open the transparent, fullscreen, always-on-top capture overlay covering all displays.
-/// Not used on macOS — the native overlays live in the TeilCapture Swift library.
-#[cfg(not(target_os = "macos"))]
+/// Not used on macOS/Windows — those have native overlays (TeilCapture Swift library /
+/// teil-capture-windows). Transparent webview overlays were unreliable on Windows.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn open_overlay(app: &AppHandle, mode: &str) -> anyhow::Result<()> {
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.close();

@@ -50,9 +50,14 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 anyhow = "1"
 
-# Screen/window still-capture on non-macOS platforms (WGC on Windows).
-# macOS capture is fully native: the TeilCapture Swift library (swift/TeilCapture).
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Windows capture is fully native too: raw Win32 overlay + selection in its own
+# crate (teil-capture-windows), mirroring the macOS module. Never compiled on macOS.
+[target.'cfg(windows)'.dependencies]
+teil-capture-windows = { path = "teil-capture-windows" }
+
+# HTML-overlay + xcap capture fallback for platforms WITHOUT a native module
+# (currently only Linux). macOS: TeilCapture Swift lib; Windows: teil-capture-windows.
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
 xcap = "0.9"
 
 [profile.release]

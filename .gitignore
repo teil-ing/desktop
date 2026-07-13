@@ -5,3 +5,5 @@ src-tauri/gen/
 src-tauri/swift/TeilCapture/.build/
 *.log
 .DS_Store
+src-tauri/teil-capture-windows/target/
+src-tauri/teil-capture-windows/Cargo.lock

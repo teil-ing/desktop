@@ -5041,6 +5041,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "teil-capture-windows"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "windows 0.62.2",
+ "xcap",
+]
+
+[[package]]
 name = "teil-ing-crossplatform"
 version = "0.1.0"
 dependencies = [
@@ -5063,6 +5072,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "teil-capture-windows",
  "tokio",
  "url",
  "whoami",

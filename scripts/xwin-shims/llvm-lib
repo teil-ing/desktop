@@ -1,0 +1,15 @@
+#!/bin/sh
+# Minimal lib.exe stand-in for cargo-check-only cross builds: nothing links the
+# archive, it just has to exist. MSVC flags and Unix paths both start with "/",
+# so members are recognized by existing on disk.
+out=""
+objs=""
+for a in "$@"; do
+  case "$a" in
+    /out:*) out="${a#/out:}" ;;
+    -out:*) out="${a#-out:}" ;;
+    *) [ -e "$a" ] && objs="$objs $a" ;;
+  esac
+done
+[ -n "$out" ] || { echo "llvm-lib shim: no /out:" >&2; exit 1; }
+exec ar crS "$out" $objs

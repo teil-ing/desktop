@@ -1,0 +1,17 @@
+#!/bin/sh
+# Minimal rc.exe stand-in for cargo-check-only cross builds: emit an empty .res
+# at the /fo path; it is only consumed at link time, which `cargo check` skips.
+out=""
+prev=""
+for a in "$@"; do
+  case "$a" in
+    /fo*|-fo*|/FO*|-FO*)
+      rest="${a#?fo}"; rest="${rest#:}"
+      [ -n "$rest" ] && out="$rest" || prev=fo ;;
+    *)
+      [ "$prev" = fo ] && { out="$a"; prev=""; } ;;
+  esac
+done
+[ -n "$out" ] || { echo "llvm-rc shim: no /fo" >&2; exit 1; }
+: > "$out"
+exit 0

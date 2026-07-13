@@ -1,5 +1,7 @@
-//! Screen/window still-capture for NON-macOS platforms, via xcap 0.9 (WGC on Windows).
-//! macOS uses the native TeilCapture Swift library instead (capture_macos.rs).
+//! Screen/window still-capture for platforms WITHOUT a native capture module
+//! (currently only Linux), via xcap 0.9 + the HTML overlay. macOS uses the
+//! TeilCapture Swift library (capture_macos.rs); Windows uses the
+//! teil-capture-windows Win32 crate (capture_windows.rs).
 //!
 //! xcap re-exports `image` at the same version as our direct `image` dependency,
 //! so the types unify. All xcap accessors return `XCapResult`, mapped to anyhow.
