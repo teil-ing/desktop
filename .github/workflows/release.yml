@@ -1,9 +1,9 @@
 name: Release
 
-# Tag push (make release V=x.y.z) → build, sign, notarize, upload DMG + updater
-# artifacts + latest.json to a DRAFT release, then publish it as latest. The
-# draft window prevents the updater/latest API from seeing a release whose
-# assets are still uploading.
+# Tag push (make release V=x.y.z) → build, sign, notarize, upload the macOS DMG
+# and the Windows NSIS installer + updater artifacts + latest.json to a DRAFT
+# release, then publish it as latest. The draft window prevents the updater/
+# latest API from seeing a release whose assets are still uploading.
 
 on:
   push:
@@ -90,14 +90,59 @@ jobs:
           releaseDraft: true
           args: --bundles app,dmg
 
-      - name: Publish release as latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest
-
       - name: Clean up keychain
         if: always()
         run: |
           if [ -n "${KEYCHAIN_PATH}" ]; then
             security delete-keychain "${KEYCHAIN_PATH}" || true
           fi
+
+  # Runs AFTER the macOS job (not in parallel) so the two tauri-action runs
+  # can't race while merging their platforms into the release's latest.json.
+  release-windows:
+    needs: release-macos
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload NSIS installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: true
+          args: --bundles nsis
+
+  # Publish only once BOTH platforms' assets (and the merged latest.json) are
+  # attached — the draft window prevents the updater/latest API from seeing a
+  # release whose assets are still uploading.
+  publish:
+    needs: [release-macos, release-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --latest --repo "${GITHUB_REPOSITORY}"
