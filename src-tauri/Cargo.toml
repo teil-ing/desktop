@@ -1,6 +1,6 @@
 [package]
 name = "teil-ing-crossplatform"
-version = "0.1.3"
+version = "0.1.4"
 description = "Cross-platform teil.ing screenshot client"
 edition = "2021"
 rust-version = "1.77"
