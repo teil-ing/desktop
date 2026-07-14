@@ -218,11 +218,30 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
         let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
         builder = builder.icon(icon).icon_as_template(true);
     }
-    // Windows: keep the colored app icon — a black template image would be
-    // invisible on the dark taskbar.
+    // Windows: same dashed-rectangle glyph as the macOS menu bar (tray.png is
+    // black + alpha), recolored white at runtime — Windows never tints tray icons
+    // and its taskbar is dark by default.
     #[cfg(not(target_os = "macos"))]
-    if let Some(icon) = app.default_window_icon().cloned() {
-        builder = builder.icon(icon);
+    {
+        match image::load_from_memory(include_bytes!("../icons/tray.png")) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let (w, h) = (rgba.width(), rgba.height());
+                let mut px = rgba.into_raw();
+                for p in px.chunks_exact_mut(4) {
+                    p[0] = 255;
+                    p[1] = 255;
+                    p[2] = 255;
+                }
+                builder = builder.icon(tauri::image::Image::new_owned(px, w, h));
+            }
+            // Fall back to the colored app icon if the glyph ever fails to decode.
+            Err(_) => {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    builder = builder.icon(icon);
+                }
+            }
+        }
     }
     builder.build(app)?;
     Ok(())
@@ -268,23 +287,29 @@ fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>) {
     // current_monitor() is unreliable for a still-hidden window (None → a 1920x1080
     // fallback that dragged the popover toward screen-center on larger displays, and
     // it ignored the monitor origin on multi-monitor setups). Locate the monitor
-    // from the click point instead.
-    let (mx, my, mw, mh) = win
+    // from the click point instead, and position within its WORK AREA (excludes the
+    // taskbar/menu bar).
+    let (wx, wy, ww, wh) = win
         .monitor_from_point(click.x, click.y)
         .ok()
         .flatten()
         .or_else(|| win.primary_monitor().ok().flatten())
-        .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
-        .unwrap_or((0, 0, 1920, 1080));
+        .map(|m| {
+            let r = m.work_area();
+            (r.position.x, r.position.y, r.size.width as i32, r.size.height as i32)
+        })
+        .unwrap_or((0, 0, 1920, 1040));
 
     let mut x = click_x - w / 2;
-    x = x.clamp(mx + 8, (mx + mw - w - 8).max(mx + 8));
+    x = x.clamp(wx + 8, (wx + ww - w - 8).max(wx + 8));
 
-    // If the click is in the bottom half of the display (Windows tray), open above it.
-    let y = if click_y > my + mh / 2 {
-        (click_y - h - 8).max(my + 8)
+    // Tray at the bottom (Windows): anchor flush above the taskbar — NOT relative to
+    // the click. The icon may live in the tray overflow flyout, whose click position
+    // floats well above the taskbar. Tray at the top (macOS): open below the icon.
+    let y = if click_y > wy + wh / 2 {
+        (wy + wh - h - 8).max(wy + 8)
     } else {
-        (click_y + 8).min((my + mh - h - 8).max(my + 8))
+        (click_y + 8).min((wy + wh - h - 8).max(wy + 8))
     };
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
