@@ -81,21 +81,23 @@ fn capture_window_interactive() -> Result<Option<Vec<u8>>, String> {
         overlay::Outcome::Cancelled => Ok(None),
         overlay::Outcome::Window(idx) => {
             let rect = rects[idx];
-            // Occlusion-free grab of the picked window; the frozen snapshot (what the
-            // user actually saw highlighted) is the fallback.
-            let image = windows[idx].capture_image().unwrap_or_else(|_| {
-                frozen
-                    .crop_global(
-                        rect.left,
-                        rect.top,
-                        rect.right - rect.left,
-                        rect.bottom - rect.top,
-                    )
-                    .unwrap_or_else(|_| RgbaImage::new(1, 1))
-            });
-            if image.width() <= 1 && image.height() <= 1 {
-                return Err("Window capture failed.".into());
-            }
+            // Crop the frozen snapshot — exactly the pixels the user saw highlighted
+            // (the rect is DWMWA_EXTENDED_FRAME_BOUNDS: visible frame, no shadow).
+            // A direct window grab is only the fallback: xcap goes through
+            // PrintWindow, which "succeeds" with an all-BLACK frame for
+            // GPU-composited windows (browsers, Electron, D3D apps).
+            let image = frozen
+                .crop_global(
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                )
+                .or_else(|_| {
+                    windows[idx]
+                        .capture_image()
+                        .map_err(|e| format!("Window capture failed: {e}"))
+                })?;
             Ok(Some(encode_png(&image)?))
         }
         overlay::Outcome::Region { .. } => Err("Unexpected region in window-pick mode".into()),
