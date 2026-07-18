@@ -403,6 +403,15 @@ async fn upload_capture(app: AppHandle, image: RgbaImage, png: Option<Vec<u8>>) 
     let _ = app.emit("upload-feedback", serde_json::json!({"kind":"started"}));
     set_tray_tooltip(&app, "Uploading…");
 
+    // Snapshot prefs (drop the lock before awaiting).
+    let prefs = { app.state::<AppState>().prefs.lock().unwrap().clone() };
+
+    // Image-mode clipboard copy happens BEFORE the upload: the capture is pasteable
+    // immediately and survives an upload failure. URL mode can only copy afterwards.
+    if prefs.clipboard_copy && prefs.clipboard_mode == "image" {
+        let _ = copy_image(&app, &image);
+    }
+
     let key = match secure::get_api_key() {
         Some(k) => k,
         None => return fail(&app, "No API key found. Please add your key in settings.", image),
@@ -412,17 +421,10 @@ async fn upload_capture(app: AppHandle, image: RgbaImage, png: Option<Vec<u8>>) 
         Err(e) => return fail(&app, &e, image),
     };
 
-    // Snapshot prefs (drop the lock before awaiting).
-    let prefs = { app.state::<AppState>().prefs.lock().unwrap().clone() };
-
     match api::upload(&key, png, prefs.strip_exif, prefs.private_upload).await {
         Ok((id, share_url)) => {
-            if prefs.clipboard_copy {
-                if prefs.clipboard_mode == "image" {
-                    let _ = copy_image(&app, &image);
-                } else {
-                    let _ = app.clipboard().write_text(share_url.clone());
-                }
+            if prefs.clipboard_copy && prefs.clipboard_mode != "image" {
+                let _ = app.clipboard().write_text(share_url.clone());
             }
             if prefs.open_in_browser {
                 let _ = app.opener().open_url(share_url.clone(), None::<&str>);
