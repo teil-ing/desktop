@@ -387,6 +387,18 @@ button.bordered {
 button.danger {
   color: var(--danger);
 }
+.icon-btn.del:hover {
+  color: var(--danger);
+}
+.badge-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.badge:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 .error-text {
   color: var(--danger);
   font-size: 11px;

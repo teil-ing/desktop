@@ -28,6 +28,10 @@ const state = {
   updateVersion: null as string | null,
   /** Permission was granted while running — a relaunch is required to apply it. */
   permissionGrantedMidRun: false,
+  /** Image id with the inline delete confirmation open (one at a time). */
+  confirmingDelete: null as string | null,
+  /** Image id whose deletion is in flight. */
+  deleting: null as string | null,
 };
 
 /**
@@ -111,6 +115,7 @@ async function boot() {
 async function refreshAll() {
   state.loadingRemote = true;
   state.remoteError = null;
+  state.confirmingDelete = null; // a fresh open/refresh discards pending confirms
   if (state.view === "main") render();
   try {
     const [list, quota] = await Promise.all([
@@ -345,6 +350,47 @@ function historyRow(img: ImageResponse) {
   if (img.thumbnailUrl) thumb.src = img.thumbnailUrl;
   row.appendChild(thumb);
 
+  // Inline delete confirmation replaces the row's meta + actions (Swift-less
+  // equivalent of a destructive confirm sheet, kept inside the menu).
+  if (state.confirmingDelete === img.id) {
+    const meta = el("div", { class: "meta" });
+    meta.appendChild(el("div", { class: "time", text: "Delete this image?" }));
+    meta.appendChild(el("div", { class: "views", text: "This cannot be undone." }));
+    row.appendChild(meta);
+
+    const del = el("button", {
+      class: "badge badge-danger",
+      text: state.deleting === img.id ? "Deleting…" : "Delete",
+    }) as HTMLButtonElement;
+    del.disabled = state.deleting !== null;
+    del.onclick = async () => {
+      state.deleting = img.id;
+      render();
+      try {
+        await ipc.deleteImage(img.id);
+        state.images = state.images.filter((i) => i.id !== img.id);
+        refreshAll(); // re-sync list + quota
+      } catch (err) {
+        state.remoteError = String(err).replace(/^Error:\s*/, "");
+      } finally {
+        state.deleting = null;
+        state.confirmingDelete = null;
+        render();
+      }
+    };
+    row.appendChild(del);
+
+    const cancel = el("button", { class: "badge", text: "Cancel" }) as HTMLButtonElement;
+    cancel.disabled = state.deleting !== null;
+    cancel.onclick = () => {
+      state.confirmingDelete = null;
+      render();
+    };
+    row.appendChild(cancel);
+
+    return row;
+  }
+
   const meta = el("div", { class: "meta" });
   const badges = [img.isPrivate ? wrapIcon(icons.lock) : "", img.hasPassword ? wrapIcon(icons.key) : ""].join("");
   meta.appendChild(el("div", { class: "time", html: `<span>${relativeTime(img.createdAt)}</span>${badges}` }));
@@ -372,6 +418,13 @@ function historyRow(img: ImageResponse) {
   const open = el("button", { class: "icon-btn", html: icons.open, attrs: { title: "Open in browser" } });
   open.onclick = () => ipc.openExternal(shareUrl);
   row.appendChild(open);
+
+  const del = el("button", { class: "icon-btn del", html: icons.trash, attrs: { title: "Delete image" } });
+  del.onclick = () => {
+    state.confirmingDelete = img.id;
+    render();
+  };
+  row.appendChild(del);
 
   return row;
 }
