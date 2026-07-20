@@ -4,7 +4,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import * as ipc from "./ipc";
-import { el, relativeTime, formatBytes, editUrl } from "./dom";
+import { el, relativeTime, formatBytes, editUrl, formatShortcut } from "./dom";
 import { icons } from "./icons";
 import type { ImageResponse, QuotaResponse, UploadFeedback } from "./types";
 
@@ -16,6 +16,8 @@ const state = {
   view: "loading" as View,
   images: [] as ImageResponse[],
   quota: null as QuotaResponse | null,
+  /** Capture-mode → accelerator, shown as a hint on each capture row. */
+  shortcuts: {} as Record<string, string>,
   loadingRemote: false,
   remoteError: null as string | null,
   uploadError: null as string | null,
@@ -63,7 +65,16 @@ async function applyAuthGate() {
   const onboarded = await ipc.hasApiKey().catch(() => false);
   state.view = onboarded ? "main" : "onboarding";
   render();
-  if (onboarded) refreshAll();
+  if (onboarded) {
+    loadShortcuts();
+    refreshAll();
+  }
+}
+
+/** Refresh the capture-mode shortcut hints (they can change in the Settings window). */
+async function loadShortcuts() {
+  state.shortcuts = (await ipc.getShortcuts().catch(() => ({}))) ?? {};
+  if (state.view === "main") render();
 }
 
 async function boot() {
@@ -89,7 +100,10 @@ async function boot() {
 
   // Rust emits this whenever the tray popover is shown → refresh like showPopover() does.
   await listen("popover-shown", () => {
-    if (state.view === "main") refreshAll();
+    if (state.view === "main") {
+      loadShortcuts();
+      refreshAll();
+    }
   });
 
   // Background update probe (Rust: spawn_update_check) found a newer version.
@@ -298,9 +312,11 @@ function captureSection() {
     ["Fullscreen", icons.fullscreen, "fullscreen", () => ipc.captureFullscreen()],
     ["Window", icons.window, "window", openWindowPicker],
   ];
-  for (const [label, icon, _mode, action] of modes) {
+  for (const [label, icon, mode, action] of modes) {
     const row = el("div", { class: "row capture-row" });
     row.appendChild(el("div", { class: "label grow", html: `${wrapIcon(icon)}<span>${label}</span>` }));
+    const accel = state.shortcuts[mode];
+    if (accel) row.appendChild(el("kbd", { class: "kbd", text: formatShortcut(accel) }));
     row.onclick = () => {
       ipc.hidePopover();
       action();

@@ -140,6 +140,18 @@ body.popover {
   align-items: center;
   gap: 8px;
 }
+/* Shortcut hint on capture rows */
+.kbd {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--secondary);
+  background: var(--bg);
+  border: 1px solid var(--divider);
+  border-radius: 5px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex: none;
+}
 
 /* History */
 .history-header {
