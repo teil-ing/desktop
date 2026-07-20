@@ -50,6 +50,9 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 anyhow = "1"
 
+# Local timestamps for upload filenames (clock feature = local-timezone backend).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
 # Windows capture is fully native too: raw Win32 overlay + selection in its own
 # crate (teil-capture-windows), mirroring the macOS module. Never compiled on macOS.
 [target.'cfg(windows)'.dependencies]

@@ -206,8 +206,10 @@ pub async fn delete_image(key: &str, id: &str) -> Result<()> {
 /// (matching the Swift UploadService contract: omission means off/public).
 /// Returns (image id, share url).
 pub async fn upload(key: &str, png: Vec<u8>, strip_exif: bool, is_private: bool) -> Result<(String, String)> {
+    // e.g. screenshot-2026-07-20_15-30-45.png — local time, no ':' (invalid on Windows).
+    let filename = format!("screenshot-{}.png", chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"));
     let part = reqwest::multipart::Part::bytes(png)
-        .file_name("screenshot.png")
+        .file_name(filename)
         .mime_str("image/png")?;
     let mut form = reqwest::multipart::Form::new().part("file", part);
     if strip_exif {
