@@ -11,12 +11,13 @@ import type { ClipboardMode, Prefs } from "./types";
 const root = document.getElementById("prefs-root")!;
 let prefs: Prefs | null = null;
 
-type TabId = "general" | "shortcuts" | "upload" | "account";
+type TabId = "general" | "shortcuts" | "upload" | "account" | "about";
 const TABS: { id: TabId; label: string }[] = [
   { id: "general", label: "General" },
   { id: "shortcuts", label: "Shortcuts" },
   { id: "upload", label: "Upload" },
   { id: "account", label: "Account" },
+  { id: "about", label: "About" },
 ];
 let activeTab: TabId = "general";
 
@@ -54,6 +55,9 @@ async function render() {
       break;
     case "account":
       await renderAccount(content);
+      break;
+    case "about":
+      await renderAbout(content);
       break;
   }
 }
@@ -232,6 +236,67 @@ async function renderAccount(c: HTMLElement) {
   c.appendChild(
     el("div", { class: "sub", text: "Your API key is stored in the system keychain.", attrs: { style: "margin-top: 8px" } }),
   );
+}
+
+const WEBSITE_URL = "https://teil.ing";
+const SOURCE_URL = "https://github.com/teil-ing/desktop";
+
+async function renderAbout(c: HTMLElement) {
+  const version = await ipc.appVersion().catch(() => "?");
+
+  const head = el("div", { class: "about-head" });
+  head.appendChild(el("div", { class: "about-name", text: "teil.ing" }));
+  head.appendChild(el("div", { class: "sub", text: `Version ${version}` }));
+  head.appendChild(
+    el("div", { class: "sub", text: "Fast screenshot capture and sharing.", attrs: { style: "margin-top:4px" } }),
+  );
+  c.appendChild(head);
+
+  const links = el("div", { class: "about-links" });
+  const website = el("button", { class: "bordered", text: "Website" });
+  website.onclick = () => ipc.openExternal(WEBSITE_URL);
+  links.appendChild(website);
+  const source = el("button", { class: "bordered", text: "Source Code" });
+  source.onclick = () => ipc.openExternal(SOURCE_URL);
+  links.appendChild(source);
+  c.appendChild(links);
+
+  c.appendChild(
+    el("div", { class: "sub", text: "© 2026 teil.ing · All rights reserved.", attrs: { style: "margin-top:10px" } }),
+  );
+
+  // Third-party licenses — legally required attribution for bundled OSS. The
+  // text is large, so it is lazy-loaded (a separate chunk) only on demand.
+  c.appendChild(el("div", { class: "divider", attrs: { style: "margin:12px 0" } }));
+  c.appendChild(el("div", { class: "section-label", text: "Open-Source Licenses" }));
+  c.appendChild(
+    el("div", {
+      class: "sub",
+      text: "This app includes open-source components. Their licenses and copyright notices:",
+      attrs: { style: "margin-bottom:6px" },
+    }),
+  );
+
+  const viewer = el("pre", { class: "license-text", attrs: { style: "display:none" } });
+  const btn = el("button", { class: "bordered", text: "Show Licenses" }) as HTMLButtonElement;
+  btn.onclick = async () => {
+    if (viewer.style.display === "none" && !viewer.textContent) {
+      btn.disabled = true;
+      btn.textContent = "Loading…";
+      try {
+        const mod = await import("../THIRD-PARTY-LICENSES.txt?raw");
+        viewer.textContent = mod.default;
+      } catch {
+        viewer.textContent = "Could not load license information.";
+      }
+      btn.disabled = false;
+    }
+    const showing = viewer.style.display !== "none";
+    viewer.style.display = showing ? "none" : "block";
+    btn.textContent = showing ? "Show Licenses" : "Hide Licenses";
+  };
+  c.appendChild(btn);
+  c.appendChild(viewer);
 }
 
 // ---- Shared controls -----------------------------------------------------

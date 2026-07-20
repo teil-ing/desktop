@@ -508,6 +508,34 @@ body.prefs {
   padding: 8px 18px 18px;
 }
 
+/* About tab */
+.about-head {
+  margin-bottom: 12px;
+}
+.about-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.about-links {
+  display: flex;
+  gap: 8px;
+}
+.license-text {
+  margin-top: 8px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--secondary);
+  background: var(--bg);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 8px;
+}
+
 /* Shortcuts read as native keycaps (⌃⌥⇧⌘X) — larger and clearer than the popover hint. */
 .prefs-body .shortcut {
   font-size: 14px;

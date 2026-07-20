@@ -1,0 +1,19 @@
+THIRD-PARTY SOFTWARE LICENSES
+
+This application (teil.ing desktop) incorporates open-source components.
+The full license texts and copyright notices for those components are
+reproduced below, as required by their respective licenses.
+
+Overview: {{#each overview}}{{{name}}} ({{count}}){{#unless @last}}, {{/unless}}{{/each}}
+
+================================================================================
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}}{{#if id}} ({{{id}}}){{/if}}
+
+Used by:
+{{#each used_by}}  - {{{crate.name}}} {{{crate.version}}}
+{{/each}}
+{{{text}}}
+{{/each}}

@@ -27,7 +27,13 @@ CODE_SIGN_IDENTITY ?= Developer ID Application: Tillmann Hubner (5A7M476YY2)
 BUNDLE_DIR := src-tauri/target/release/bundle
 VERSION    := $(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' src-tauri/tauri.conf.json | head -1)
 
-.PHONY: dev deps app app-signed dmg dmg-signed dmg-release bump release clean
+.PHONY: dev deps app app-signed dmg dmg-signed dmg-release bump release clean licenses
+
+# Regenerate THIRD-PARTY-LICENSES.txt from the current dependency tree.
+# Requires: cargo install cargo-about --features cli
+# Run after changing Rust/npm dependencies, then commit the result.
+licenses:
+	./scripts/gen-licenses.sh
 
 deps:
 	@test -d node_modules || npm install

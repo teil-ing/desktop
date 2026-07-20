@@ -4,6 +4,7 @@ version = "0.1.9"
 description = "Cross-platform teil.ing screenshot client"
 edition = "2021"
 rust-version = "1.77"
+publish = false
 
 [lib]
 name = "teil_ing_lib"
