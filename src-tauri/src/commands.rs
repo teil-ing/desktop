@@ -150,20 +150,20 @@ pub fn spawn_native_capture(app: AppHandle, mode: &'static str) {
         show_main(&app);
         return;
     }
-    // Hide the popover right before capturing. hide() completes asynchronously in
-    // the compositor, so when it was actually visible, wait a beat — otherwise the
-    // popover is still on screen when the overlay freezes it and ends up baked
-    // into the screenshot.
-    let was_visible = app
-        .get_webview_window("main")
-        .map(|w| {
+    // Hide the popover AND the settings window right before capturing. hide()
+    // completes asynchronously in the compositor, so when either was actually
+    // visible, wait a beat — otherwise it is still on screen when the overlay
+    // freezes it and ends up baked into the screenshot.
+    let was_visible = ["main", "preferences"]
+        .into_iter()
+        .filter_map(|label| app.get_webview_window(label))
+        .fold(false, |any, w| {
             let visible = w.is_visible().unwrap_or(false);
             if visible {
                 let _ = w.hide();
             }
-            visible
-        })
-        .unwrap_or(false);
+            any || visible
+        });
     tauri::async_runtime::spawn(async move {
         if was_visible {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
