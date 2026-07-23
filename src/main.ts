@@ -317,10 +317,9 @@ function captureSection() {
     row.appendChild(el("div", { class: "label grow", html: `${wrapIcon(icon)}<span>${label}</span>` }));
     const accel = state.shortcuts[mode];
     if (accel) row.appendChild(el("kbd", { class: "kbd", text: formatShortcut(accel) }));
-    row.onclick = () => {
-      ipc.hidePopover();
-      action();
-    };
+    // Don't hidePopover() here — the capture command hides the popover itself and
+    // waits for it to leave the screen before freezing the screenshot.
+    row.onclick = () => action();
     s.appendChild(row);
   }
   return s;

@@ -196,17 +196,18 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
             }
         })
         .on_tray_icon_event(|tray, event| {
-            // Left-click toggles the popover near the click point (Swift: togglePopover).
+            // Left-click toggles the popover attached to the tray icon (Swift: togglePopover).
             if let TrayIconEvent::Click {
                 button,
                 button_state,
                 position,
+                rect,
                 ..
             } = event
             {
-                eprintln!("[teil.ing] tray click: {button:?} {button_state:?}");
+                eprintln!("[teil.ing] tray click: {button:?} {button_state:?} rect={rect:?}");
                 if button == MouseButton::Left && button_state == MouseButtonState::Up {
-                    toggle_popover(tray.app_handle(), position);
+                    toggle_popover(tray.app_handle(), position, rect);
                 }
             }
         });
@@ -247,7 +248,7 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>) {
+fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>, icon_rect: tauri::Rect) {
     let Some(win) = app.get_webview_window("main") else {
         eprintln!("[teil.ing] toggle_popover: main window not found");
         return;
@@ -257,7 +258,7 @@ fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>) {
     if visible {
         let _ = win.hide();
     } else {
-        position_popover(&win, click);
+        position_popover(&win, click, icon_rect);
         if let Err(e) = win.show() {
             eprintln!("[teil.ing] popover show failed: {e}");
         }
@@ -275,41 +276,54 @@ fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>) {
     }
 }
 
-/// Place the popover near the tray click, on the monitor the click happened on,
-/// clamped to that monitor's bounds. The tray sits at the top on macOS and
-/// bottom-right on Windows, so this flips above/below the click. All physical px.
-fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>) {
+/// Place the popover attached to the tray ICON — centered on it, opening upward
+/// flush with its top edge when the tray is at the bottom (Windows) and downward
+/// below it when the tray is at the top (macOS) — like a native tray menu.
+/// Clamped to the monitor's work area. All physical px.
+fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>, icon_rect: tauri::Rect) {
     let size = win.outer_size().unwrap_or(PhysicalSize::new(336, 560));
     let (w, h) = (size.width as i32, size.height as i32);
-    let click_x = click.x as i32;
-    let click_y = click.y as i32;
 
     // current_monitor() is unreliable for a still-hidden window (None → a 1920x1080
     // fallback that dragged the popover toward screen-center on larger displays, and
     // it ignored the monitor origin on multi-monitor setups). Locate the monitor
     // from the click point instead, and position within its WORK AREA (excludes the
     // taskbar/menu bar).
-    let (wx, wy, ww, wh) = win
+    let monitor = win
         .monitor_from_point(click.x, click.y)
         .ok()
         .flatten()
-        .or_else(|| win.primary_monitor().ok().flatten())
+        .or_else(|| win.primary_monitor().ok().flatten());
+    let scale = monitor.as_ref().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let (wx, wy, ww, wh) = monitor
         .map(|m| {
             let r = m.work_area();
             (r.position.x, r.position.y, r.size.width as i32, r.size.height as i32)
         })
         .unwrap_or((0, 0, 1920, 1040));
 
-    let mut x = click_x - w / 2;
+    // Anchor to the icon's bounds, not the click point — clicks land anywhere inside
+    // the icon (or on a flyout icon well above the taskbar), and anchoring to the
+    // bounds is what makes the popover hug the icon like a menu. A zero-sized rect
+    // (platform didn't report one) falls back to the click point.
+    let ipos: PhysicalPosition<i32> = icon_rect.position.to_physical(scale);
+    let isize: PhysicalSize<u32> = icon_rect.size.to_physical(scale);
+    let (anchor_x, icon_top, icon_bottom) = if isize.width > 0 && isize.height > 0 {
+        (ipos.x + isize.width as i32 / 2, ipos.y, ipos.y + isize.height as i32)
+    } else {
+        (click.x as i32, click.y as i32, click.y as i32)
+    };
+
+    let mut x = anchor_x - w / 2;
     x = x.clamp(wx + 8, (wx + ww - w - 8).max(wx + 8));
 
-    // Tray at the bottom (Windows): anchor flush above the taskbar — NOT relative to
-    // the click. The icon may live in the tray overflow flyout, whose click position
-    // floats well above the taskbar. Tray at the top (macOS): open below the icon.
-    let y = if click_y > wy + wh / 2 {
-        (wy + wh - h - 8).max(wy + 8)
+    // Icon in the lower half (Windows taskbar / overflow flyout): open upward, flush
+    // above the icon. Upper half (macOS menu bar): open below the icon.
+    const GAP: i32 = 6;
+    let y = if (icon_top + icon_bottom) / 2 > wy + wh / 2 {
+        (icon_top - h - GAP).max(wy + 8)
     } else {
-        (click_y + 8).min((wy + wh - h - 8).max(wy + 8))
+        (icon_bottom + GAP).min((wy + wh - h - 8).max(wy + 8))
     };
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
@@ -329,13 +343,12 @@ pub fn register_shortcut(app: &AppHandle, mode: &str, accel: &str) -> Result<(),
 }
 
 pub fn trigger_capture(app: &AppHandle, mode: &str) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.hide();
-    }
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         // Fully native flows (macOS: TeilCapture Swift library; Windows:
-        // teil-capture-windows Win32 overlay) — no HTML overlay.
+        // teil-capture-windows Win32 overlay) — no HTML overlay. Hiding the
+        // popover (plus the settle delay that keeps it out of the frozen
+        // screenshot) is owned by spawn_native_capture.
         let mode: &'static str = match mode {
             "region" => "region",
             "window" => "window",
@@ -343,6 +356,10 @@ pub fn trigger_capture(app: &AppHandle, mode: &str) {
             _ => return,
         };
         commands::spawn_native_capture(app.clone(), mode);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     match mode {
