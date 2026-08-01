@@ -359,7 +359,8 @@ function historySection() {
 
 function historyRow(img: ImageResponse) {
   const shareUrl = `https://teil.ing/i/${img.slug}`;
-  const row = el("div", { class: "history-row" });
+  const confirming = state.confirmingDelete === img.id;
+  const row = el("div", { class: confirming ? "history-row confirming" : "history-row" });
 
   const thumb = el("img", { class: "thumb" }) as HTMLImageElement;
   if (img.thumbnailUrl) thumb.src = img.thumbnailUrl;
@@ -367,15 +368,30 @@ function historyRow(img: ImageResponse) {
 
   // Inline delete confirmation replaces the row's meta + actions (Swift-less
   // equivalent of a destructive confirm sheet, kept inside the menu).
-  if (state.confirmingDelete === img.id) {
-    const meta = el("div", { class: "meta" });
-    meta.appendChild(el("div", { class: "time", text: "Delete this image?" }));
-    meta.appendChild(el("div", { class: "views", text: "This cannot be undone." }));
+  if (confirming) {
+    const busy = state.deleting === img.id;
+
+    const meta = el("div", { class: "confirm-meta" });
+    meta.appendChild(el("div", { class: "title", html: `${icons.trash}<span>Delete image?</span>` }));
+    meta.appendChild(el("div", { class: "sub", text: "Can't be undone." }));
     row.appendChild(meta);
 
+    const actions = el("div", { class: "confirm-actions" });
+
+    const cancel = el("button", { class: "btn-sm", text: "Cancel" }) as HTMLButtonElement;
+    cancel.disabled = state.deleting !== null;
+    cancel.onclick = () => {
+      state.confirmingDelete = null;
+      render();
+    };
+    actions.appendChild(cancel);
+
+    // Spinner-only while in flight: the label would widen the pill past what a
+    // 320px row can hold next to the prompt text.
     const del = el("button", {
-      class: "badge badge-danger",
-      text: state.deleting === img.id ? "Deleting…" : "Delete",
+      class: busy ? "btn-sm solid-danger busy" : "btn-sm solid-danger",
+      html: busy ? '<span class="spinner"></span>' : "<span>Delete</span>",
+      attrs: busy ? { title: "Deleting…" } : {},
     }) as HTMLButtonElement;
     del.disabled = state.deleting !== null;
     del.onclick = async () => {
@@ -393,16 +409,9 @@ function historyRow(img: ImageResponse) {
         render();
       }
     };
-    row.appendChild(del);
+    actions.appendChild(del);
 
-    const cancel = el("button", { class: "badge", text: "Cancel" }) as HTMLButtonElement;
-    cancel.disabled = state.deleting !== null;
-    cancel.onclick = () => {
-      state.confirmingDelete = null;
-      render();
-    };
-    row.appendChild(cancel);
-
+    row.appendChild(actions);
     return row;
   }
 

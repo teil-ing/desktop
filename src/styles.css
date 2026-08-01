@@ -180,6 +180,115 @@ body.popover {
 .history-row:hover {
   background: var(--hover);
 }
+/* Inline delete confirmation — the row itself turns into a destructive prompt
+   (a menu can't host a modal sheet, so the row carries the whole affordance). */
+.history-row.confirming,
+.history-row.confirming:hover {
+  background: rgba(255, 59, 48, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.3);
+  animation: confirm-in 0.14s ease-out;
+}
+@media (prefers-color-scheme: dark) {
+  .history-row.confirming,
+  .history-row.confirming:hover {
+    background: rgba(255, 69, 58, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(255, 69, 58, 0.38);
+  }
+}
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+/* Dim the thumbnail so the prompt, not the image, holds the eye. */
+.history-row.confirming .thumb {
+  opacity: 0.5;
+}
+.confirm-meta {
+  flex: 1;
+  min-width: 0;
+}
+.confirm-meta .title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.confirm-meta .title svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.confirm-meta .sub {
+  font-size: 10px;
+  color: var(--secondary);
+}
+/* The row is only 320px wide — never let the prompt wrap it to two lines. */
+.confirm-meta .title span,
+.confirm-meta .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.btn-sm {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--divider);
+  background: var(--card);
+  color: var(--secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.btn-sm:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--text);
+}
+.btn-sm.solid-danger {
+  /* Floor the width so swapping the label for the spinner doesn't shift the row. */
+  min-width: 62px;
+  font-weight: 600;
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn-sm.solid-danger:hover:not(:disabled) {
+  background: #e02d23;
+  border-color: #e02d23;
+  color: #fff;
+}
+.btn-sm:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* The in-flight button is disabled too, but it shouldn't read as inactive. */
+.btn-sm.busy:disabled {
+  opacity: 1;
+}
+.btn-sm .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 1.5px;
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+}
+
 .thumb {
   width: 32px;
   height: 32px;
@@ -207,10 +316,6 @@ body.popover {
 .meta .views {
   font-size: 10px;
   color: var(--tertiary);
-}
-.badge {
-  font-size: 10px;
-  color: var(--secondary);
 }
 .empty {
   text-align: center;
@@ -401,15 +506,6 @@ button.danger {
 }
 .icon-btn.del:hover {
   color: var(--danger);
-}
-.badge-danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-.badge:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 .error-text {
   color: var(--danger);
