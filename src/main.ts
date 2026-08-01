@@ -4,7 +4,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import * as ipc from "./ipc";
-import { el, relativeTime, formatBytes, editUrl, formatShortcut } from "./dom";
+import { el, relativeTime, formatBytes, editUrl, settingsUrl, formatShortcut } from "./dom";
 import { icons } from "./icons";
 import type { ImageResponse, QuotaResponse, UploadFeedback } from "./types";
 
@@ -439,9 +439,9 @@ function historyRow(img: ImageResponse) {
   };
   row.appendChild(copy);
 
-  const open = el("button", { class: "icon-btn", html: icons.open, attrs: { title: "Open in browser" } });
-  open.onclick = () => ipc.openExternal(shareUrl);
-  row.appendChild(open);
+  const settings = el("button", { class: "icon-btn", html: icons.gear, attrs: { title: "Image settings" } });
+  settings.onclick = () => ipc.openExternal(settingsUrl(shareUrl));
+  row.appendChild(settings);
 
   const del = el("button", { class: "icon-btn del", html: icons.trash, attrs: { title: "Delete image" } });
   del.onclick = () => {
@@ -449,6 +449,14 @@ function historyRow(img: ImageResponse) {
     render();
   };
   row.appendChild(del);
+
+  // The row itself opens the view page — that's what the removed "open in browser"
+  // button did. Clicks that land on an action button are theirs, not the row's.
+  row.title = "Open in browser";
+  row.onclick = (e) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    ipc.openExternal(shareUrl);
+  };
 
   return row;
 }

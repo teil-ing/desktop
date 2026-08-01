@@ -176,6 +176,8 @@ body.popover {
   padding: 4px 8px;
   margin: 0 6px;
   border-radius: 6px;
+  /* The whole row opens the image's view page. */
+  cursor: pointer;
 }
 .history-row:hover {
   background: var(--hover);
@@ -186,6 +188,8 @@ body.popover {
 .history-row.confirming:hover {
   background: rgba(255, 59, 48, 0.1);
   box-shadow: inset 0 0 0 1px rgba(255, 59, 48, 0.3);
+  /* While confirming, the row isn't a link — only its two buttons act. */
+  cursor: default;
 }
 @media (prefers-color-scheme: dark) {
   .history-row.confirming,

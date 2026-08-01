@@ -50,6 +50,9 @@ export function formatBytes(bytes: number): string {
 /** teil.ing share URL → its web edit page (append /edit). */
 export const editUrl = (shareUrl: string) => `${shareUrl}/edit`;
 
+/** teil.ing share URL → its per-image settings page (append /settings). */
+export const settingsUrl = (shareUrl: string) => `${shareUrl}/settings`;
+
 /**
  * Render a Tauri accelerator ("CmdOrCtrl+Shift+X") the way the platform shows shortcuts:
  * ⌃⌥⇧⌘X on macOS, "Ctrl+Shift+X" on Windows.
