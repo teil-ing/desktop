@@ -163,6 +163,25 @@ function render() {
     default:
       root.appendChild(el("div", { class: "pane center", html: '<span class="spinner"></span>' }));
   }
+  syncPopoverHeight();
+}
+
+/** Matches `body.popover { padding: 8px }` in styles.css. */
+const BODY_PADDING = 8;
+
+/**
+ * The window sizes itself to the card. Measure after the browser has laid the new
+ * DOM out, and only talk to Rust when the height actually moved — every render calls
+ * this, but most renders don't change the height.
+ */
+let reportedHeight = 0;
+function syncPopoverHeight() {
+  requestAnimationFrame(() => {
+    const height = Math.ceil(root.getBoundingClientRect().height) + BODY_PADDING * 2;
+    if (height === reportedHeight || height <= BODY_PADDING * 2) return;
+    reportedHeight = height;
+    ipc.setPopoverHeight(height).catch(() => {});
+  });
 }
 
 // ---- Permission gate (blocks everything until granted + relaunched) -------

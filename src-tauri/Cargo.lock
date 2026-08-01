@@ -5077,6 +5077,7 @@ dependencies = [
  "tokio",
  "url",
  "whoami",
+ "winreg",
  "xcap",
 ]
 

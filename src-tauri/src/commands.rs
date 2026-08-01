@@ -514,6 +514,35 @@ pub fn hide_popover(app: AppHandle) {
     }
 }
 
+/// The popover sizes itself to its content: the frontend reports the card's rendered
+/// height after every render and the window is resized to match, then re-placed —
+/// Windows anchors the popover by its BOTTOM edge, so a height change moves it.
+#[tauri::command]
+pub fn set_popover_height(app: AppHandle, state: State<AppState>, height: f64) {
+    if !height.is_finite() {
+        return;
+    }
+    let height = (height.ceil() as u32).clamp(80, 900);
+    {
+        let mut stored = state.popover_height.lock().unwrap();
+        if *stored == height {
+            return;
+        }
+        *stored = height;
+    }
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let anchor = *state.popover_anchor.lock().unwrap();
+    match anchor {
+        Some(anchor) => crate::place_popover(&win, anchor, height),
+        // No tray click yet — just size it; the first open places it.
+        None => {
+            let _ = win.set_size(tauri::LogicalSize::new(crate::POPOVER_WIDTH, height as f64));
+        }
+    }
+}
+
 /// Open (or focus) the Settings window — a real decorated dialog, not the in-popover pane.
 /// MUST be async: on Windows, building a webview window from a synchronous command
 /// stalls WebView2 initialization (the window opens but stays white).

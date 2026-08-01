@@ -130,6 +130,15 @@ export const installUpdate = () => invoke<void>("install_update");
 /** Hide the popover (mirrors NSPopover transient dismiss). */
 export const hidePopover = () => invoke<void>("hide_popover");
 
+/**
+ * Report the popover's rendered height so the window can size to its content.
+ * The window is transparent and the card is laid out from the top, so an oversized
+ * window would leave the card floating away from the tray icon on Windows (where the
+ * popover is anchored by its bottom edge).
+ */
+export const setPopoverHeight = (height: number) =>
+  invoke<void>("set_popover_height", { height });
+
 /** Open (or focus) the Settings window. */
 export const openPreferences = () => invoke<void>("open_preferences");
 

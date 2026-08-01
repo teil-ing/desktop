@@ -58,6 +58,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # crate (teil-capture-windows), mirroring the macOS module. Never compiled on macOS.
 [target.'cfg(windows)'.dependencies]
 teil-capture-windows = { path = "teil-capture-windows" }
+# Reads SystemUsesLightTheme so the tray glyph can contrast with the taskbar.
+winreg = "0.55"
 
 # HTML-overlay + xcap capture fallback for platforms WITHOUT a native module
 # (currently only Linux). macOS: TeilCapture Swift lib; Windows: teil-capture-windows.

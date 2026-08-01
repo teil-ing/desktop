@@ -20,13 +20,32 @@ use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
+    WindowEvent,
 };
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-use tauri::{LogicalPosition, LogicalSize, WebviewUrl, WebviewWindowBuilder};
+use tauri::{LogicalPosition, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use prefs::Prefs;
+
+/// Where the tray icon sat at the last click, in physical px. Placement is recomputed
+/// from this every time the popover's content height changes, so the popover keeps
+/// hugging the icon as it grows and shrinks.
+#[derive(Clone, Copy)]
+pub struct TrayAnchor {
+    /// Horizontal center of the icon.
+    pub center_x: i32,
+    pub icon_top: i32,
+    pub icon_bottom: i32,
+    /// Click point, used to pick the monitor the tray lives on.
+    pub probe: (f64, f64),
+}
+
+/// Popover card width in logical px — 320px card + 8px body padding either side.
+pub const POPOVER_WIDTH: f64 = 336.0;
+/// Height used until the frontend reports its first measurement.
+const POPOVER_DEFAULT_HEIGHT: u32 = 560;
 
 /// Shared application state (Swift: the various @MainActor singletons).
 pub struct AppState {
@@ -42,6 +61,10 @@ pub struct AppState {
     pub overlay_origin: Mutex<(i32, i32)>,
     /// In-flight browser sign-in, waiting for its teiling://connect callback.
     pub pending_signin: Mutex<Option<auth::PendingSignin>>,
+    /// Tray-icon anchor from the last tray click; None until the popover is first opened.
+    pub popover_anchor: Mutex<Option<TrayAnchor>>,
+    /// Popover content height in LOGICAL px, reported by the frontend after each render.
+    pub popover_height: Mutex<u32>,
 }
 
 pub fn run() {
@@ -105,6 +128,7 @@ pub fn run() {
             commands::delete_image,
             commands::retry_upload,
             commands::hide_popover,
+            commands::set_popover_height,
             commands::open_preferences,
             commands::open_external,
             commands::quit_app,
@@ -146,6 +170,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         overlay_mode: Mutex::new(String::new()),
         overlay_origin: Mutex::new((0, 0)),
         pending_signin: Mutex::new(None),
+        popover_anchor: Mutex::new(None),
+        popover_height: Mutex::new(POPOVER_DEFAULT_HEIGHT),
     });
 
     // Browser sign-in callbacks (teiling://connect?code=…&state=…).
@@ -213,31 +239,21 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
         });
 
     // macOS: dashed-rectangle template image (Swift app: SF Symbol "rectangle.dashed") —
-    // black + alpha, so the system tints it for light/dark menu bars and selection.
+    // black + alpha, so the system itself tints it for light AND dark menu bars (and
+    // for the selected/highlighted state). No manual theme tracking needed.
     #[cfg(target_os = "macos")]
     {
         let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
         builder = builder.icon(icon).icon_as_template(true);
     }
-    // Windows: same dashed-rectangle glyph as the macOS menu bar (tray.png is
-    // black + alpha), recolored white at runtime — Windows never tints tray icons
-    // and its taskbar is dark by default.
+    // Windows and the rest: no template images, so the glyph is recolored to contrast
+    // with the taskbar and re-applied whenever the system theme flips.
     #[cfg(not(target_os = "macos"))]
     {
-        match image::load_from_memory(include_bytes!("../icons/tray.png")) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                let (w, h) = (rgba.width(), rgba.height());
-                let mut px = rgba.into_raw();
-                for p in px.chunks_exact_mut(4) {
-                    p[0] = 255;
-                    p[1] = 255;
-                    p[2] = 255;
-                }
-                builder = builder.icon(tauri::image::Image::new_owned(px, w, h));
-            }
+        match tray_icon_for_theme(light_taskbar()) {
+            Some(icon) => builder = builder.icon(icon),
             // Fall back to the colored app icon if the glyph ever fails to decode.
-            Err(_) => {
+            None => {
                 if let Some(icon) = app.default_window_icon().cloned() {
                     builder = builder.icon(icon);
                 }
@@ -245,7 +261,73 @@ fn build_tray(app: &mut tauri::App) -> tauri::Result<()> {
         }
     }
     builder.build(app)?;
+
+    #[cfg(target_os = "windows")]
+    watch_taskbar_theme(app.handle().clone());
+
     Ok(())
+}
+
+/// True when the taskbar/tray is light and the glyph must be drawn dark.
+///
+/// Windows exposes this as SystemUsesLightTheme, which is separate from the app theme
+/// (AppsUseLightTheme) — under "Choose your mode: Custom" the two disagree, and it's
+/// the system one that colors the taskbar. Defaults to a dark taskbar, the Windows
+/// out-of-the-box look.
+#[cfg(target_os = "windows")]
+fn light_taskbar() -> bool {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("SystemUsesLightTheme"))
+        .map(|v| v == 1)
+        .unwrap_or(false)
+}
+
+/// Linux and friends: no tray theme to read, assume a dark panel.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn light_taskbar() -> bool {
+    false
+}
+
+/// tray.png is a black + alpha glyph; recolor it to contrast with the tray background.
+/// Alpha is left untouched so the antialiased dashes keep their shape.
+#[cfg(not(target_os = "macos"))]
+fn tray_icon_for_theme(light_taskbar: bool) -> Option<tauri::image::Image<'static>> {
+    let rgba = image::load_from_memory(include_bytes!("../icons/tray.png"))
+        .ok()?
+        .to_rgba8();
+    let (w, h) = (rgba.width(), rgba.height());
+    let mut px = rgba.into_raw();
+    let lum = if light_taskbar { 0 } else { 255 };
+    for p in px.chunks_exact_mut(4) {
+        p[0] = lum;
+        p[1] = lum;
+        p[2] = lum;
+    }
+    Some(tauri::image::Image::new_owned(px, w, h))
+}
+
+/// Repaint the tray glyph when the user flips Windows between light and dark.
+///
+/// Polled rather than event-driven: WM_SETTINGCHANGE/ThemeChanged track the APP theme,
+/// which "Custom" mode lets you set independently of the taskbar, so the registry value
+/// is the only reliable signal. Theme flips are rare and the check is a registry read.
+#[cfg(target_os = "windows")]
+fn watch_taskbar_theme(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut current = light_taskbar();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let light = light_taskbar();
+            if light == current {
+                continue;
+            }
+            current = light;
+            if let (Some(tray), Some(icon)) = (app.tray_by_id("main"), tray_icon_for_theme(light)) {
+                let _ = tray.set_icon(Some(icon));
+            }
+        }
+    });
 }
 
 fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>, icon_rect: tauri::Rect) {
@@ -258,7 +340,34 @@ fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>, icon_rect: taur
     if visible {
         let _ = win.hide();
     } else {
-        position_popover(&win, click, icon_rect);
+        // Anchor to the icon's bounds, not the click point — clicks land anywhere inside
+        // the icon (or on a flyout icon well above the taskbar), and anchoring to the
+        // bounds is what makes the popover hug the icon like a menu. A zero-sized rect
+        // (platform didn't report one) falls back to the click point.
+        let scale = monitor_scale_at(&win, click.x, click.y);
+        let ipos: PhysicalPosition<i32> = icon_rect.position.to_physical(scale);
+        let isize: PhysicalSize<u32> = icon_rect.size.to_physical(scale);
+        let anchor = if isize.width > 0 && isize.height > 0 {
+            TrayAnchor {
+                center_x: ipos.x + isize.width as i32 / 2,
+                icon_top: ipos.y,
+                icon_bottom: ipos.y + isize.height as i32,
+                probe: (click.x, click.y),
+            }
+        } else {
+            TrayAnchor {
+                center_x: click.x as i32,
+                icon_top: click.y as i32,
+                icon_bottom: click.y as i32,
+                probe: (click.x, click.y),
+            }
+        };
+
+        let state = app.state::<AppState>();
+        *state.popover_anchor.lock().unwrap() = Some(anchor);
+        let height = *state.popover_height.lock().unwrap();
+        place_popover(&win, anchor, height);
+
         if let Err(e) = win.show() {
             eprintln!("[teil.ing] popover show failed: {e}");
         }
@@ -276,21 +385,33 @@ fn toggle_popover(app: &AppHandle, click: PhysicalPosition<f64>, icon_rect: taur
     }
 }
 
-/// Place the popover attached to the tray ICON — centered on it, opening upward
-/// flush with its top edge when the tray is at the bottom (Windows) and downward
-/// below it when the tray is at the top (macOS) — like a native tray menu.
-/// Clamped to the monitor's work area. All physical px.
-fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>, icon_rect: tauri::Rect) {
-    let size = win.outer_size().unwrap_or(PhysicalSize::new(336, 560));
-    let (w, h) = (size.width as i32, size.height as i32);
+/// Scale factor of the monitor containing a physical point.
+fn monitor_scale_at(win: &WebviewWindow, x: f64, y: f64) -> f64 {
+    win.monitor_from_point(x, y)
+        .ok()
+        .flatten()
+        .or_else(|| win.primary_monitor().ok().flatten())
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0)
+}
 
+/// Size the popover to `height` (logical px of content) and place it attached to the
+/// tray ICON — centered on it, opening upward flush with its top edge when the tray is
+/// at the bottom (Windows) and downward below it when the tray is at the top (macOS),
+/// like a native tray menu. Clamped to the monitor's work area.
+///
+/// Sizing to the content is what makes the bottom anchor land: the window is
+/// transparent and the card is laid out from its TOP, so a window taller than its card
+/// left the card floating above the tray by the unused remainder (and the empty part
+/// still swallowed clicks). All coordinates physical px.
+pub(crate) fn place_popover(win: &WebviewWindow, anchor: TrayAnchor, height: u32) {
     // current_monitor() is unreliable for a still-hidden window (None → a 1920x1080
     // fallback that dragged the popover toward screen-center on larger displays, and
     // it ignored the monitor origin on multi-monitor setups). Locate the monitor
     // from the click point instead, and position within its WORK AREA (excludes the
     // taskbar/menu bar).
     let monitor = win
-        .monitor_from_point(click.x, click.y)
+        .monitor_from_point(anchor.probe.0, anchor.probe.1)
         .ok()
         .flatten()
         .or_else(|| win.primary_monitor().ok().flatten());
@@ -302,28 +423,22 @@ fn position_popover(win: &WebviewWindow, click: PhysicalPosition<f64>, icon_rect
         })
         .unwrap_or((0, 0, 1920, 1040));
 
-    // Anchor to the icon's bounds, not the click point — clicks land anywhere inside
-    // the icon (or on a flyout icon well above the taskbar), and anchoring to the
-    // bounds is what makes the popover hug the icon like a menu. A zero-sized rect
-    // (platform didn't report one) falls back to the click point.
-    let ipos: PhysicalPosition<i32> = icon_rect.position.to_physical(scale);
-    let isize: PhysicalSize<u32> = icon_rect.size.to_physical(scale);
-    let (anchor_x, icon_top, icon_bottom) = if isize.width > 0 && isize.height > 0 {
-        (ipos.x + isize.width as i32 / 2, ipos.y, ipos.y + isize.height as i32)
-    } else {
-        (click.x as i32, click.y as i32, click.y as i32)
-    };
+    let _ = win.set_size(LogicalSize::new(POPOVER_WIDTH, height as f64));
+    // Derive the physical box from the size we just asked for — outer_size() can still
+    // report the pre-resize value this early.
+    let w = (POPOVER_WIDTH * scale).round() as i32;
+    let h = (height as f64 * scale).round() as i32;
 
-    let mut x = anchor_x - w / 2;
+    let mut x = anchor.center_x - w / 2;
     x = x.clamp(wx + 8, (wx + ww - w - 8).max(wx + 8));
 
     // Icon in the lower half (Windows taskbar / overflow flyout): open upward, flush
     // above the icon. Upper half (macOS menu bar): open below the icon.
     const GAP: i32 = 6;
-    let y = if (icon_top + icon_bottom) / 2 > wy + wh / 2 {
-        (icon_top - h - GAP).max(wy + 8)
+    let y = if (anchor.icon_top + anchor.icon_bottom) / 2 > wy + wh / 2 {
+        (anchor.icon_top - h - GAP).max(wy + 8)
     } else {
-        (icon_bottom + GAP).min((wy + wh - h - 8).max(wy + 8))
+        (anchor.icon_bottom + GAP).min((wy + wh - h - 8).max(wy + 8))
     };
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
