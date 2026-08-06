@@ -59,6 +59,10 @@ export interface Prefs {
   autoCheckForUpdates: boolean;
   privateUpload: boolean;
   clipboardMode: ClipboardMode;
+  /** Folder downloads are saved to; null = the OS Downloads folder. */
+  downloadDir: string | null;
+  /** Show a save dialog per download instead of writing straight to downloadDir. */
+  askWhereToSave: boolean;
 }
 
 /** A capturable on-screen window + geometry (points, top-left origin), from `list_windows`. */

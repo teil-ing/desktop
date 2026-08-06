@@ -4,7 +4,7 @@ This application (teil.ing desktop) incorporates open-source components.
 The full license texts and copyright notices for those components are
 reproduced below, as required by their respective licenses.
 
-Overview: Apache License 2.0 (428), MIT License (160), Unicode License v3 (19), BSD 3-Clause "New" or "Revised" License (5), ISC License (5), Mozilla Public License 2.0 (5), Boost Software License 1.0 (2), Community Data License Agreement Permissive 2.0 (2), zlib License (2), BSD 2-Clause "Simplified" License (1), Creative Commons Zero v1.0 Universal (1)
+Overview: Apache License 2.0 (430), MIT License (161), Unicode License v3 (19), BSD 3-Clause "New" or "Revised" License (5), ISC License (5), Mozilla Public License 2.0 (5), Boost Software License 1.0 (2), Community Data License Agreement Permissive 2.0 (2), zlib License (2), BSD 2-Clause "Simplified" License (1), Creative Commons Zero v1.0 Universal (1)
 
 ================================================================================
 
@@ -9111,6 +9111,8 @@ Used by:
   - tauri-macros 2.6.3
   - tauri-plugin-clipboard-manager 2.3.2
   - tauri-plugin-deep-link 2.4.9
+  - tauri-plugin-dialog 2.7.2
+  - tauri-plugin-fs 2.5.1
   - tauri-plugin-global-shortcut 2.3.2
   - tauri-plugin-notification 2.3.3
   - tauri-plugin-opener 2.5.4
@@ -11111,6 +11113,34 @@ Used by:
 MIT License
 
 Copyright (c) 2021 the Deno authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+MIT License (MIT)
+
+Used by:
+  - rfd 0.16.0
+MIT License
+
+Copyright (c) 2022 Bartłomiej Maryńczak
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

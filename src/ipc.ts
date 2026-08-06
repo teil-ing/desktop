@@ -93,6 +93,26 @@ export const updateImage = (id: string, update: ImageUpdateRequest) =>
 
 export const deleteImage = (id: string) => invoke<void>("delete_image", { id });
 
+// ---- Downloads -----------------------------------------------------------
+
+/**
+ * Save an image's original to disk. Resolves with the written path, or null when
+ * the user cancelled the save dialog (prefs.askWhereToSave).
+ */
+export const downloadImage = (id: string) => invoke<string | null>("download_image", { id });
+
+/** Effective download folder (the configured one, or the OS default). */
+export const downloadDir = () => invoke<string>("download_dir");
+
+/** The folder used when no override is configured. */
+export const defaultDownloadDir = () => invoke<string>("default_download_dir");
+
+/** Native folder picker; resolves null when the user cancels. */
+export const pickDownloadDir = () => invoke<string | null>("pick_download_dir");
+
+/** Reveal a file or folder in Finder / Explorer. */
+export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
+
 /** Retry the last failed upload. */
 export const retryUpload = () => invoke<void>("retry_upload");
 

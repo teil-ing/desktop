@@ -202,6 +202,42 @@ pub async fn delete_image(key: &str, id: &str) -> Result<()> {
     }
 }
 
+/// Fetch the stored original behind an `imageUrl` (i.teil.ing). Public images need no
+/// auth, but the key is sent anyway so private ones resolve too.
+///
+/// Own client: originals are multi-megabyte, so the shared 30s total timeout is as
+/// wrong here as it is for uploads.
+pub async fn download_file(key: &str, url: &str) -> Result<Vec<u8>> {
+    let resp = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?
+        .get(url)
+        .header("X-API-Key", key)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                anyhow!("Download timed out. Check your connection speed.")
+            } else {
+                anyhow!("Could not reach teil.ing ({}).", root_cause(&e))
+            }
+        })?;
+    let code = resp.status().as_u16();
+    if !(200..300).contains(&code) {
+        return Err(match code {
+            401 | 403 => anyhow!("Not allowed to download this image."),
+            404 => anyhow!("Image file not found."),
+            c => status_error(c),
+        });
+    }
+    Ok(resp
+        .bytes()
+        .await
+        .map_err(|_| anyhow!("Download was interrupted."))?
+        .to_vec())
+}
+
 /// POST /upload — multipart with `file`, plus `stripExif`/`private` fields ONLY when on
 /// (matching the Swift UploadService contract: omission means off/public).
 /// Returns (image id, share url).

@@ -505,6 +505,162 @@ pub async fn delete_image(id: String) -> Result<(), String> {
     api::delete_image(&key()?, &id).await.map_err(|e| e.to_string())
 }
 
+// ---- Downloading originals to disk ---------------------------------------
+
+/// Where downloads land: the configured folder, or the OS Downloads folder when
+/// unset (the default the Settings window shows).
+fn download_dir_path(app: &AppHandle) -> std::path::PathBuf {
+    let configured = app.state::<AppState>().prefs.lock().unwrap().download_dir.clone();
+    match configured.filter(|s| !s.trim().is_empty()) {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => default_download_dir_path(app),
+    }
+}
+
+/// `~/Downloads` on macOS, the Downloads known folder on Windows. Falls back to
+/// `<home>/Downloads` if the platform resolver has no answer.
+fn default_download_dir_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir().map(|h| h.join("Downloads")))
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Effective download folder, for display in Settings.
+#[tauri::command]
+pub fn download_dir(app: AppHandle) -> String {
+    download_dir_path(&app).to_string_lossy().into_owned()
+}
+
+/// The folder used when no override is set — shown as the "Default" hint.
+#[tauri::command]
+pub fn default_download_dir(app: AppHandle) -> String {
+    default_download_dir_path(&app).to_string_lossy().into_owned()
+}
+
+/// Native folder picker, seeded with the current folder. None = user cancelled.
+/// Async + oneshot rather than `blocking_pick_folder`: the blocking variant
+/// deadlocks when called from the main thread, which is where commands run.
+#[tauri::command]
+pub async fn pick_download_dir(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let start = download_dir_path(&app);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Choose Download Folder")
+        .set_directory(start)
+        .pick_folder(move |picked| {
+            let _ = tx.send(picked);
+        });
+    let picked = rx.await.map_err(|e| e.to_string())?;
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// Show a saved file (or the download folder) in Finder / Explorer.
+#[tauri::command]
+pub fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
+    app.opener().reveal_item_in_dir(path).map_err(|e| e.to_string())
+}
+
+/// Save an image's original to disk. Returns the written path, or None when the
+/// user cancelled the save dialog (`ask_where_to_save`).
+///
+/// Takes an id, not a URL: the stored `imageUrl` is re-fetched from the API so a
+/// stale popover list can't point the writer at an arbitrary host.
+#[tauri::command]
+pub async fn download_image(app: AppHandle, id: String) -> Result<Option<String>, String> {
+    let key = key()?;
+    let details = api::get_image_details(&key, &id).await.map_err(|e| e.to_string())?;
+    let url = details
+        .image_url
+        .ok_or_else(|| "This image has no downloadable file.".to_string())?;
+
+    let filename = safe_filename(&details.original_filename, &details.id, &details.mime_type);
+    let dir = download_dir_path(&app);
+    let ask = app.state::<AppState>().prefs.lock().unwrap().ask_where_to_save;
+
+    // Ask BEFORE fetching — cancelling shouldn't have cost a multi-megabyte download.
+    let path = if ask {
+        match save_dialog(&app, &dir, &filename).await? {
+            Some(path) => path,
+            None => return Ok(None),
+        }
+    } else {
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
+        unique_path(&dir, &filename)
+    };
+
+    let bytes = api::download_file(&key, &url).await.map_err(|e| e.to_string())?;
+    std::fs::write(&path, &bytes).map_err(|e| format!("Could not save the image: {e}"))?;
+    eprintln!("[teil.ing] saved {} bytes to {}", bytes.len(), path.display());
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Native save-file sheet, seeded with the download folder + the image's own name.
+/// The dialog owns overwrite confirmation, so the result is used as picked.
+async fn save_dialog(
+    app: &AppHandle,
+    dir: &std::path::Path,
+    filename: &str,
+) -> Result<Option<std::path::PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("Save Image")
+        .set_directory(dir)
+        .set_file_name(filename)
+        .save_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+    let picked = rx.await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()))
+}
+
+/// A server-supplied filename is untrusted input — keep only the last path
+/// component and drop anything a path or a Windows filename can't contain.
+fn safe_filename(raw: &str, id: &str, mime: &str) -> String {
+    let base = std::path::Path::new(raw).file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') && !c.is_control())
+        .collect();
+    // Leading/trailing dots and spaces are legal on POSIX but not on Windows.
+    let cleaned = cleaned.trim().trim_matches('.').trim();
+    if cleaned.is_empty() {
+        let ext = mime.rsplit('/').next().filter(|e| !e.is_empty()).unwrap_or("png");
+        return format!("teiling-{id}.{ext}");
+    }
+    cleaned.to_string()
+}
+
+/// Don't overwrite: `shot.png` → `shot (1).png` → `shot (2).png` … Past 1000
+/// same-named files in one folder it gives up and reuses the plain name.
+fn unique_path(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    let candidate = dir.join(filename);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let path = std::path::Path::new(filename);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(filename);
+    let ext = path.extension().and_then(|s| s.to_str());
+    for n in 1..1000 {
+        let name = match ext {
+            Some(ext) => format!("{stem} ({n}).{ext}"),
+            None => format!("{stem} ({n})"),
+        };
+        let candidate = dir.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    candidate
+}
+
 // ---- Window chrome / meta ------------------------------------------------
 
 #[tauri::command]

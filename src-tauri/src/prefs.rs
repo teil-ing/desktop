@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+// `default` at the container level: a prefs.json written by an older build is missing
+// any newly added field, and without this serde rejects the whole file — silently
+// resetting every setting the user had. Missing fields now fall back individually.
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Prefs {
     pub strip_exif: bool,
     pub open_in_browser: bool,
@@ -16,6 +19,12 @@ pub struct Prefs {
     pub private_upload: bool,
     /// "url" | "image"
     pub clipboard_mode: String,
+    /// Where "Download" writes images. None = the OS Downloads folder (see
+    /// commands::download_dir_path).
+    pub download_dir: Option<String>,
+    /// Prompt with a save dialog on every download instead of writing straight
+    /// into `download_dir` (which then only seeds the dialog).
+    pub ask_where_to_save: bool,
 }
 
 impl Default for Prefs {
@@ -29,6 +38,9 @@ impl Default for Prefs {
             auto_check_for_updates: true,
             private_upload: false,
             clipboard_mode: "url".into(),
+            download_dir: None,
+            // Zero-friction by default: one click saves, no dialog.
+            ask_where_to_save: false,
         }
     }
 }

@@ -94,6 +94,64 @@ async function renderGeneral(c: HTMLElement) {
   };
   row.appendChild(checkBtn);
   c.appendChild(row);
+
+  c.appendChild(el("div", { class: "divider", attrs: { style: "margin:12px 0 10px" } }));
+  await renderDownloadFolder(c);
+}
+
+/** Download folder picker — where the popover's "Save to disk" button writes. */
+async function renderDownloadFolder(c: HTMLElement) {
+  const p = prefs!;
+  const [dir, fallback] = await Promise.all([
+    ipc.downloadDir().catch(() => ""),
+    ipc.defaultDownloadDir().catch(() => ""),
+  ]);
+
+  c.appendChild(el("div", { class: "section-label", text: "Downloads", attrs: { style: "padding:0 0 4px" } }));
+  // Re-render on change: the folder below is the destination in one mode and only
+  // the dialog's starting point in the other, and the caption has to say which.
+  c.appendChild(
+    toggle("Ask Where to Save", "Show a save dialog for each download", p.askWhereToSave, (v) =>
+      save({ askWhereToSave: v }).then(render),
+    ),
+  );
+  // .sub only gets its styling inside a .toggle-row, so spell it out here.
+  c.appendChild(
+    el("div", {
+      class: "sub",
+      text: p.askWhereToSave
+        ? "The save dialog opens in this folder."
+        : "“Save to disk” writes here without asking.",
+      attrs: { style: "font-size:11px;color:var(--secondary);margin-bottom:6px" },
+    }),
+  );
+
+  const row = el("div", { class: "toggle-row", attrs: { style: "margin:0" } });
+  const pathBox = el("div", { class: "grow path-box" });
+  pathBox.appendChild(el("span", { text: dir || fallback }));
+  pathBox.title = `${dir}\nClick to show in your file manager`;
+  pathBox.onclick = () => ipc.revealPath(dir).catch(() => {});
+  row.appendChild(pathBox);
+
+  const choose = el("button", { class: "bordered", text: "Choose…" }) as HTMLButtonElement;
+  choose.onclick = async () => {
+    choose.disabled = true;
+    try {
+      const picked = await ipc.pickDownloadDir();
+      if (picked) await save({ downloadDir: picked }).then(render);
+    } finally {
+      choose.disabled = false;
+    }
+  };
+  row.appendChild(choose);
+  c.appendChild(row);
+
+  // Only offer the reset once there is something to reset to.
+  if (p.downloadDir) {
+    const reset = el("button", { class: "text-btn", text: `Reset to ${fallback}`, attrs: { style: "margin-top:6px" } });
+    reset.onclick = () => save({ downloadDir: null }).then(render);
+    c.appendChild(reset);
+  }
 }
 
 async function renderShortcuts(c: HTMLElement) {

@@ -182,6 +182,21 @@ body.popover {
 .history-row:hover {
   background: var(--hover);
 }
+/* Action toolbar. Five buttons share a 320px row with a thumbnail and the timestamp,
+   so they run tighter than a standalone .icon-btn: smaller glyphs, butted together
+   like a native segmented toolbar. 142px of buttons → 104px, handed to the timestamp. */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  /* Trims the row's 8px gap on this side — the meta column needs the space more. */
+  margin-right: -2px;
+}
+.row-actions .icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
 /* Inline delete confirmation — the row itself turns into a destructive prompt
    (a menu can't host a modal sheet, so the row carries the whole affordance). */
 .history-row.confirming,
@@ -627,6 +642,32 @@ body.prefs {
   border: 1px solid var(--divider);
   border-radius: 6px;
   padding: 8px;
+}
+
+/* Download folder path — one line, truncated from the LEFT so the folder name
+   (the part that identifies it) stays visible on a long path. */
+.path-box {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--secondary);
+  background: var(--card);
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* rtl puts the overflow (and the ellipsis) on the LEFT; the isolated inner span
+     keeps the path itself rendering left-to-right. */
+  direction: rtl;
+  cursor: pointer;
+}
+.path-box > span {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.path-box:hover {
+  color: var(--text);
 }
 
 /* Shortcuts read as native keycaps (⌃⌥⇧⌘X) — larger and clearer than the popover hint. */

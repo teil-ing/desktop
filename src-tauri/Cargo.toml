@@ -24,6 +24,8 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
+# Native folder picker for the "save downloads here" preference.
+tauri-plugin-dialog = "2"
 # Browser sign-in: teiling://connect callbacks. single-instance (deep-link feature)
 # forwards scheme launches on Windows to the running instance.
 tauri-plugin-deep-link = "2"

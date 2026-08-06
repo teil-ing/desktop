@@ -440,10 +440,13 @@ function historyRow(img: ImageResponse) {
   meta.appendChild(el("div", { class: "views", text: `${img.viewCount} ${img.viewCount === 1 ? "view" : "views"}` }));
   row.appendChild(meta);
 
-  // Edit (web) + Copy + Open — same trio as HistoryRowView.
+  // Edit (web) + Copy + Download + Settings + Delete, packed into one dense
+  // toolbar — five separate .icon-btn siblings ate most of a 320px row.
+  const actions = el("div", { class: "row-actions" });
+
   const edit = el("button", { class: "icon-btn", html: icons.edit, attrs: { title: "Edit on teil.ing" } });
   edit.onclick = () => ipc.openExternal(editUrl(shareUrl));
-  row.appendChild(edit);
+  actions.appendChild(edit);
 
   const copy = el("button", { class: "icon-btn", html: icons.copy, attrs: { title: "Copy URL" } });
   copy.onclick = async () => {
@@ -456,18 +459,48 @@ function historyRow(img: ImageResponse) {
       copy.style.color = "";
     }, 1500);
   };
-  row.appendChild(copy);
+  actions.appendChild(copy);
+
+  // Saves the original into the download folder (Settings → General). Once saved,
+  // the button turns into a reveal-in-Finder shortcut for the file it just wrote —
+  // it reverts to "Save to disk" on the next refresh, which every popover open does.
+  const download = el("button", { class: "icon-btn", html: icons.save, attrs: { title: "Save to disk" } }) as HTMLButtonElement;
+  download.onclick = async () => {
+    download.disabled = true;
+    download.innerHTML = '<span class="spinner"></span>';
+    try {
+      const path = await ipc.downloadImage(img.id);
+      // null = the save dialog was cancelled; leave the button as it was.
+      if (!path) {
+        download.innerHTML = icons.save;
+        return;
+      }
+      download.innerHTML = icons.folder;
+      download.style.color = "var(--success)";
+      download.title = `Saved to ${path} — click to show in folder`;
+      download.onclick = () => ipc.revealPath(path).catch(() => {});
+    } catch (err) {
+      download.innerHTML = icons.save;
+      state.remoteError = String(err).replace(/^Error:\s*/, "");
+      render();
+    } finally {
+      download.disabled = false;
+    }
+  };
+  actions.appendChild(download);
 
   const settings = el("button", { class: "icon-btn", html: icons.gear, attrs: { title: "Image settings" } });
   settings.onclick = () => ipc.openExternal(settingsUrl(shareUrl));
-  row.appendChild(settings);
+  actions.appendChild(settings);
 
   const del = el("button", { class: "icon-btn del", html: icons.trash, attrs: { title: "Delete image" } });
   del.onclick = () => {
     state.confirmingDelete = img.id;
     render();
   };
-  row.appendChild(del);
+  actions.appendChild(del);
+
+  row.appendChild(actions);
 
   // The row itself opens the view page — that's what the removed "open in browser"
   // button did. Clicks that land on an action button are theirs, not the row's.
