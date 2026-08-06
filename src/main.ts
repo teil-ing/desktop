@@ -21,6 +21,9 @@ const state = {
   loadingRemote: false,
   remoteError: null as string | null,
   uploadError: null as string | null,
+  /** Last "Save to disk" failure — a write can fail for reasons (permissions, full
+   *  disk) the small grey list error is too quiet to carry. */
+  downloadError: null as string | null,
   /** Browser sign-in: waiting for the teiling:// callback. */
   authWaiting: false,
   authError: null as string | null,
@@ -129,6 +132,7 @@ async function boot() {
 async function refreshAll() {
   state.loadingRemote = true;
   state.remoteError = null;
+  state.downloadError = null;
   state.confirmingDelete = null; // a fresh open/refresh discards pending confirms
   if (state.view === "main") render();
   try {
@@ -310,6 +314,13 @@ function renderMain() {
     c.appendChild(el("div", { class: "divider" }));
   }
 
+  if (state.downloadError) {
+    const banner = el("div", { class: "banner" });
+    banner.appendChild(el("div", { class: "line", html: `${icons.warn}<span>${escapeHtml(state.downloadError)}</span>` }));
+    c.appendChild(banner);
+    c.appendChild(el("div", { class: "divider" }));
+  }
+
   c.appendChild(captureSection());
   c.appendChild(el("div", { class: "divider" }));
   c.appendChild(historySection());
@@ -444,6 +455,14 @@ function historyRow(img: ImageResponse) {
   // toolbar — five separate .icon-btn siblings ate most of a 320px row.
   const actions = el("div", { class: "row-actions" });
 
+  // The row's own handler (below) opens the share page for clicks that miss a
+  // button, and decides that by walking up from e.target. A handler that swaps its
+  // button's innerHTML — the download spinner — detaches e.target before the event
+  // gets there, so that walk finds nothing and the row opened the website on every
+  // download. Stop the bubble here instead: whatever a button did to its contents,
+  // a click inside the toolbar is never a row click.
+  actions.onclick = (e) => e.stopPropagation();
+
   const edit = el("button", { class: "icon-btn", html: icons.edit, attrs: { title: "Edit on teil.ing" } });
   edit.onclick = () => ipc.openExternal(editUrl(shareUrl));
   actions.appendChild(edit);
@@ -468,6 +487,7 @@ function historyRow(img: ImageResponse) {
   download.onclick = async () => {
     download.disabled = true;
     download.innerHTML = '<span class="spinner"></span>';
+    state.downloadError = null;
     try {
       const path = await ipc.downloadImage(img.id);
       // null = the save dialog was cancelled; leave the button as it was.
@@ -481,7 +501,7 @@ function historyRow(img: ImageResponse) {
       download.onclick = () => ipc.revealPath(path).catch(() => {});
     } catch (err) {
       download.innerHTML = icons.save;
-      state.remoteError = String(err).replace(/^Error:\s*/, "");
+      state.downloadError = String(err).replace(/^Error:\s*/, "");
       render();
     } finally {
       download.disabled = false;
