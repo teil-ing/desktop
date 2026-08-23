@@ -5251,7 +5251,7 @@ dependencies = [
 
 [[package]]
 name = "teil-ing-crossplatform"
-version = "0.1.18"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
