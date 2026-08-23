@@ -102,6 +102,15 @@ jobs:
 
   release-windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        # x64 for the Intel/AMD world, aarch64 for Windows-on-ARM (Snapdragon
+        # laptops, Parallels/VMware on Apple Silicon) — the x64 build runs
+        # emulated there, and screen recording is far too hot for emulation.
+        # aarch64 is cross-compiled on the x64 runner (VS ships the ARM64
+        # MSVC toolchain); this only works because Windows builds carry no C
+        # code (TLS is schannel there — see Cargo.toml).
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,11 +123,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -134,7 +146,7 @@ jobs:
           releaseName: ${{ github.ref_name }}
           releaseDraft: true
           includeUpdaterJson: false
-          args: --bundles nsis
+          args: --bundles nsis --target ${{ matrix.target }}
 
   # Assemble latest.json from both platforms' .sig assets, then publish. Runs
   # only once BOTH build jobs are done — the draft window prevents the updater/
@@ -154,7 +166,8 @@ jobs:
           gh release download "$TAG" --repo "$REPO" --pattern '*.sig'
 
           mac_sig_file=$(ls *.app.tar.gz.sig)
-          win_sig_file=$(ls *-setup.exe.sig 2>/dev/null || ls *.nsis.zip.sig)
+          win_x64_sig_file=$(ls *_x64-setup.exe.sig)
+          win_arm64_sig_file=$(ls *_arm64-setup.exe.sig)
           base="https://github.com/$REPO/releases/download/$TAG"
 
           jq -n \
@@ -162,15 +175,18 @@ jobs:
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg mac_sig "$(cat "$mac_sig_file")" \
             --arg mac_url "$base/${mac_sig_file%.sig}" \
-            --arg win_sig "$(cat "$win_sig_file")" \
-            --arg win_url "$base/${win_sig_file%.sig}" \
+            --arg win_x64_sig "$(cat "$win_x64_sig_file")" \
+            --arg win_x64_url "$base/${win_x64_sig_file%.sig}" \
+            --arg win_arm64_sig "$(cat "$win_arm64_sig_file")" \
+            --arg win_arm64_url "$base/${win_arm64_sig_file%.sig}" \
             '{
               version: $version,
               notes: "",
               pub_date: $pub_date,
               platforms: {
                 "darwin-aarch64": { signature: $mac_sig, url: $mac_url },
-                "windows-x86_64": { signature: $win_sig, url: $win_url }
+                "windows-x86_64": { signature: $win_x64_sig, url: $win_x64_url },
+                "windows-aarch64": { signature: $win_arm64_sig, url: $win_arm64_url }
               }
             }' > latest.json
           cat latest.json
