@@ -43,10 +43,19 @@ body {
   color: var(--text);
 }
 
-/* Transparent window; the card draws the rounded, shadowed popover surface. */
+/* Transparent window; the card draws the rounded, shadowed popover surface.
+   overflow: hidden on BOTH scroll hosts is load-bearing: the window sizes
+   itself to the content AFTER a render (syncPopoverHeight), so on open the
+   content briefly overflows the previous window height — which flashed a
+   scrollbar (classic-styled on Windows) down the popover's edge. It never
+   scrolls for real; anything taller than the window is a sizing bug. */
+html:has(> body.popover) {
+  overflow: hidden;
+}
 body.popover {
   background: transparent;
   padding: 8px;
+  overflow: hidden;
 }
 
 .card {
