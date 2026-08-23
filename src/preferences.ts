@@ -22,14 +22,23 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 let activeTab: TabId = "general";
 
-/** Screen recording is macOS-only in v1 — hides the Video tab elsewhere. */
+/**
+ * The Video tab shows only where recording exists AND the account can
+ * actually upload video (Pro/admin — the server rejects everyone else).
+ */
 let recordingSupported = false;
-const supportedProbe = ipc
-  .getRecordingStatus()
-  .then((r) => {
-    recordingSupported = r.supported;
-  })
-  .catch(() => {});
+const supportedProbe = Promise.all([
+  ipc
+    .getRecordingStatus()
+    .then((r) => r.supported)
+    .catch(() => false),
+  ipc
+    .getQuota()
+    .then((q) => q.tier === "pro" || q.tier === "admin")
+    .catch(() => false),
+]).then(([supported, proTier]) => {
+  recordingSupported = supported && proTier;
+});
 
 async function render() {
   root.innerHTML = "";

@@ -414,7 +414,7 @@ function renderMain() {
   }
 
   c.appendChild(captureSection());
-  if (state.recording.supported) {
+  if (canRecordVideo()) {
     c.appendChild(el("div", { class: "divider" }));
     c.appendChild(recordSection());
   }
@@ -453,6 +453,18 @@ function captureSection() {
 }
 
 // ---- Recording -----------------------------------------------------------
+
+/**
+ * Video uploads are Pro-only server-side — recording a clip a free account
+ * cannot upload is a dead end, so the whole feature hides until the quota
+ * call reports a pro/admin tier (and appears the moment an upgrade lands,
+ * since every popover open refreshes quota).
+ */
+function canRecordVideo(): boolean {
+  if (!state.recording.supported) return false;
+  const tier = state.quota?.tier;
+  return tier === "pro" || tier === "admin";
+}
 
 function recordSection() {
   const s = el("div", { class: "section" });
