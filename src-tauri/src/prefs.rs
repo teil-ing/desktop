@@ -25,6 +25,12 @@ pub struct Prefs {
     /// Prompt with a save dialog on every download instead of writing straight
     /// into `download_dir` (which then only seeds the dialog).
     pub ask_where_to_save: bool,
+    /// Recording frame rate: 30 or 60.
+    pub video_fps: u32,
+    /// Include system audio (what the Mac is playing) in recordings.
+    pub video_capture_audio: bool,
+    /// Include the mouse pointer in recordings.
+    pub video_show_cursor: bool,
 }
 
 impl Default for Prefs {
@@ -41,6 +47,9 @@ impl Default for Prefs {
             download_dir: None,
             // Zero-friction by default: one click saves, no dialog.
             ask_where_to_save: false,
+            video_fps: 30,
+            video_capture_audio: false,
+            video_show_cursor: true,
         }
     }
 }

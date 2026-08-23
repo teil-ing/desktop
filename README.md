@@ -5,6 +5,7 @@ Menu-bar / tray client for [teil.ing](https://teil.ing) — capture screenshots 
 ## Features
 
 - **Region, window, and fullscreen capture** with global shortcuts (⌘⇧X / ⌘⇧C / ⌘⇧S, customizable)
+- **Screen recording** (macOS): record a region, window, or the full screen as H.264 MP4 with optional system audio — controlled from a menu-bar timer with pause/resume, uploaded like a screenshot (a region spanning two displays records the display it mostly covers)
 - Native capture on macOS: crosshair selection overlay, hover-to-pick window capture, multi-monitor support
 - Uploads straight to teil.ing — share link on your clipboard, optionally opened in the browser
 - Sign in with your browser (no API key juggling), key stored in the OS keychain

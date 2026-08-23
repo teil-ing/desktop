@@ -24,14 +24,14 @@ fn key() -> Result<String, String> {
     secure::get_api_key().ok_or_else(|| "No API key found. Please add your key in settings.".to_string())
 }
 
-fn set_tray_tooltip(app: &AppHandle, text: &str) {
+pub(crate) fn set_tray_tooltip(app: &AppHandle, text: &str) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(text));
     }
 }
 
 /// Run a blocking capture off the async runtime so IPC/UI stays responsive.
-async fn blocking<T, F>(f: F) -> Result<T, String>
+pub(crate) async fn blocking<T, F>(f: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
@@ -142,6 +142,12 @@ pub fn reset_shortcuts(app: AppHandle, state: State<AppState>) {
 /// existing upload pipeline. Mode: "region" | "window" | "fullscreen".
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn spawn_native_capture(app: AppHandle, mode: &'static str) {
+    // Screenshots are refused while a recording runs: the capture overlay would be
+    // baked into the recording and the two upload flows would interleave.
+    if crate::recording::is_active(&app) {
+        eprintln!("[teil.ing] capture blocked: recording in progress");
+        return;
+    }
     // Without the TCC grant every capture fails — surface the popover (which is
     // parked on the blocking permission screen) instead of starting the overlay.
     #[cfg(target_os = "macos")]
@@ -391,13 +397,13 @@ pub fn spawn_fullscreen(app: AppHandle) {
 // ---- Upload orchestration (Swift: UploadService.performUpload) -----------
 
 /// Show the popover and push a failure banner (Swift: reopen popover on error) + log to stderr.
-fn report_failure(app: &AppHandle, message: &str) {
+pub(crate) fn report_failure(app: &AppHandle, message: &str) {
     eprintln!("[teil.ing] {message}");
     let _ = app.emit("upload-feedback", serde_json::json!({"kind":"failed","message":message}));
     show_main(app);
 }
 
-fn show_main(app: &AppHandle) {
+pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
@@ -459,7 +465,8 @@ async fn upload_capture(app: AppHandle, image: RgbaImage, png: Option<Vec<u8>>) 
 }
 
 fn fail(app: &AppHandle, message: &str, image: RgbaImage) {
-    *app.state::<AppState>().last_failed.lock().unwrap() = Some(image);
+    *app.state::<AppState>().last_failed.lock().unwrap() =
+        Some(crate::recording::FailedUpload::Image(image));
     set_tray_tooltip(app, "Upload failed");
     report_failure(app, message);
 }
@@ -472,9 +479,20 @@ fn copy_image(app: &AppHandle, image: &RgbaImage) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn retry_upload(app: AppHandle) {
-    let image = { app.state::<AppState>().last_failed.lock().unwrap().clone() };
-    if let Some(image) = image {
-        upload_capture(app, image, None).await;
+    use crate::recording::FailedUpload;
+    let failed = {
+        let state = app.state::<AppState>();
+        let guard = state.last_failed.lock().unwrap();
+        match guard.as_ref() {
+            Some(FailedUpload::Image(img)) => Some(FailedUpload::Image(img.clone())),
+            Some(FailedUpload::Video(v)) => Some(FailedUpload::Video(v.clone())),
+            None => None,
+        }
+    };
+    match failed {
+        Some(FailedUpload::Image(image)) => upload_capture(app, image, None).await,
+        Some(FailedUpload::Video(video)) => crate::recording::retry_video(app, video).await,
+        None => {}
     }
 }
 
@@ -574,6 +592,9 @@ pub fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
 pub async fn download_image(app: AppHandle, id: String) -> Result<Option<String>, String> {
     let key = key()?;
     let details = api::get_image_details(&key, &id).await.map_err(|e| e.to_string())?;
+    if details.kind == "video" {
+        return Err("Videos can't be saved to disk yet.".into());
+    }
     let url = details
         .image_url
         .ok_or_else(|| "This image has no downloadable file.".to_string())?;
@@ -786,4 +807,37 @@ pub fn spawn_update_check(app: AppHandle) {
             let _ = app.emit("update-available", serde_json::json!({ "version": update.version }));
         }
     });
+}
+
+
+// ---- Screen recording -----------------------------------------------------
+
+#[tauri::command]
+pub fn begin_recording(app: AppHandle, mode: String) -> Result<(), String> {
+    crate::trigger_record(&app, &mode)
+}
+
+#[tauri::command]
+pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
+    crate::recording::pause(app).await
+}
+
+#[tauri::command]
+pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
+    crate::recording::resume(app).await
+}
+
+#[tauri::command]
+pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
+    crate::recording::stop(app).await
+}
+
+#[tauri::command]
+pub async fn cancel_recording(app: AppHandle) -> Result<(), String> {
+    crate::recording::cancel(app).await
+}
+
+#[tauri::command]
+pub fn get_recording_status(app: AppHandle) -> crate::recording::RecordingStatus {
+    crate::recording::status(&app)
 }

@@ -31,7 +31,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # Signed in-place auto-updates from GitHub releases (latest.json).
-tauri-plugin-updater = "2"
+# TLS backend chosen per-target below (schannel on Windows — see reqwest note).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["zip"] }
 
 # PKCE bits for the browser connect flow (Swift: AuthService).
 sha2 = "0.10"
@@ -42,8 +43,14 @@ whoami = "1"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs"] }
+# TLS: rustls everywhere except Windows, where schannel (native-tls) avoids
+# ring's C build entirely — which also makes aarch64-pc-windows cross-builds
+# from macOS possible (ring's cc invocation breaks under cargo-xwin there).
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream"] }
+# Streaming the recorded MP4 from disk as an upload body (ReaderStream + inspect_ok).
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = { version = "0.3", default-features = false }
 
 # Shared image type + PNG codec (same crate/version xcap re-exports, so types unify).
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -59,12 +66,18 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Windows capture is fully native too: raw Win32 overlay + selection in its own
 # crate (teil-capture-windows), mirroring the macOS module. Never compiled on macOS.
 [target.'cfg(windows)'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+tauri-plugin-updater = { version = "2", default-features = false, features = ["zip", "native-tls"] }
 teil-capture-windows = { path = "teil-capture-windows" }
 # Reads SystemUsesLightTheme so the tray glyph can contrast with the taskbar.
 winreg = "0.55"
 
 # HTML-overlay + xcap capture fallback for platforms WITHOUT a native module
 # (currently only Linux). macOS: TeilCapture Swift lib; Windows: teil-capture-windows.
+[target.'cfg(not(windows))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-updater = { version = "2", default-features = false, features = ["zip", "rustls-tls"] }
+
 [target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
 xcap = "0.9"
 
@@ -72,3 +85,10 @@ xcap = "0.9"
 opt-level = "s"
 lto = true
 strip = true
+
+# windows-capture 2.0.1 with one fix: when audio is disabled, the encoder must
+# not declare an AAC stream at all — upstream only stops feeding it samples,
+# and the resulting sample-less audio track makes bunny Stream's transcoder
+# fail the whole video (status 5). Vendored under src-tauri/vendor.
+[patch.crates-io]
+windows-capture = { path = "vendor/windows-capture" }

@@ -11,15 +11,25 @@ import type { ClipboardMode, Prefs } from "./types";
 const root = document.getElementById("prefs-root")!;
 let prefs: Prefs | null = null;
 
-type TabId = "general" | "shortcuts" | "upload" | "account" | "about";
+type TabId = "general" | "shortcuts" | "upload" | "video" | "account" | "about";
 const TABS: { id: TabId; label: string }[] = [
   { id: "general", label: "General" },
   { id: "shortcuts", label: "Shortcuts" },
   { id: "upload", label: "Upload" },
+  { id: "video", label: "Video" },
   { id: "account", label: "Account" },
   { id: "about", label: "About" },
 ];
 let activeTab: TabId = "general";
+
+/** Screen recording is macOS-only in v1 — hides the Video tab elsewhere. */
+let recordingSupported = false;
+const supportedProbe = ipc
+  .getRecordingStatus()
+  .then((r) => {
+    recordingSupported = r.supported;
+  })
+  .catch(() => {});
 
 async function render() {
   root.innerHTML = "";
@@ -29,8 +39,9 @@ async function render() {
     return;
   }
 
+  await supportedProbe;
   const bar = el("div", { class: "tabbar" });
-  for (const t of TABS) {
+  for (const t of TABS.filter((t) => t.id !== "video" || recordingSupported)) {
     const b = el("button", { class: `tab${activeTab === t.id ? " active" : ""}`, text: t.label });
     b.onclick = () => {
       activeTab = t.id;
@@ -52,6 +63,9 @@ async function render() {
       break;
     case "upload":
       renderUpload(content);
+      break;
+    case "video":
+      renderVideo(content);
       break;
     case "account":
       await renderAccount(content);
@@ -357,6 +371,44 @@ async function renderAbout(c: HTMLElement) {
   c.appendChild(viewer);
 }
 
+function renderVideo(c: HTMLElement) {
+  if (!prefs) return;
+  c.appendChild(
+    segmented(
+      "Frame Rate",
+      "Higher frame rates look smoother and produce larger files.",
+      [
+        ["30", "30 fps"],
+        ["60", "60 fps"],
+      ],
+      String(prefs.videoFps === 60 ? 60 : 30),
+      (v) => save({ videoFps: Number(v) }).then(render),
+    ),
+  );
+  // System-audio capture is macOS-only for now (the Windows recorder is
+  // video-only until WASAPI loopback lands) — hide the dead toggle there.
+  const isMac = /mac/i.test(navigator.userAgent);
+  if (isMac) {
+    c.appendChild(
+      toggle("Record System Audio", "Include what is playing on your Mac.", prefs.videoCaptureAudio, (v) =>
+        save({ videoCaptureAudio: v }),
+      ),
+    );
+  }
+  c.appendChild(
+    toggle("Show Cursor", "Include the mouse pointer in the recording.", prefs.videoShowCursor, (v) =>
+      save({ videoShowCursor: v }),
+    ),
+  );
+  c.appendChild(
+    el("div", {
+      class: "sub",
+      text: "Recordings are uploaded as MP4 when you stop them. Video uploads require a teil.ing Pro subscription.",
+      attrs: { style: "margin-top: 10px" },
+    }),
+  );
+}
+
 // ---- Shared controls -----------------------------------------------------
 
 function toggle(title: string, sub: string, value: boolean, onChange: (v: boolean) => void) {
@@ -375,20 +427,39 @@ function toggle(title: string, sub: string, value: boolean, onChange: (v: boolea
   return row;
 }
 
-/** Segmented URL/Image picker (Swift: the .segmented Picker under Copy to Clipboard). */
-function clipboardModeRow(mode: ClipboardMode) {
+/** Generic segmented picker: optional title row + caption + pill buttons. */
+function segmented(
+  title: string | null,
+  caption: string,
+  options: readonly (readonly [string, string])[],
+  value: string,
+  onChange: (v: string) => void,
+) {
   const wrap = el("div", { attrs: { style: "margin: 2px 0 10px 0" } });
-  wrap.appendChild(
-    el("div", { class: "sub", text: "Copy the share URL or the captured image.", attrs: { style: "margin-bottom: 4px" } }),
-  );
+  if (title) wrap.appendChild(el("div", { text: title }));
+  wrap.appendChild(el("div", { class: "sub", text: caption, attrs: { style: "margin-bottom: 4px" } }));
   const seg = el("div", { class: "segmented" });
-  for (const [val, label] of [["url", "Share URL"], ["image", "Image"]] as const) {
-    const b = el("button", { class: `seg${mode === val ? " active" : ""}`, text: label });
-    b.onclick = () => save({ clipboardMode: val }).then(render);
+  for (const [val, label] of options) {
+    const b = el("button", { class: `seg${value === val ? " active" : ""}`, text: label });
+    b.onclick = () => onChange(val);
     seg.appendChild(b);
   }
   wrap.appendChild(seg);
   return wrap;
+}
+
+/** Segmented URL/Image picker (Swift: the .segmented Picker under Copy to Clipboard). */
+function clipboardModeRow(mode: ClipboardMode) {
+  return segmented(
+    null,
+    "Copy the share URL or the captured image.",
+    [
+      ["url", "Share URL"],
+      ["image", "Image"],
+    ],
+    mode,
+    (v) => save({ clipboardMode: v as ClipboardMode }).then(render),
+  );
 }
 
 async function save(patch: Partial<Prefs>) {

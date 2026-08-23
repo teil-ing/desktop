@@ -6,11 +6,12 @@ mod auth;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod capture;
 #[cfg(target_os = "macos")]
-mod capture_macos;
+pub mod capture_macos;
 #[cfg(target_os = "windows")]
 mod capture_windows;
 mod commands;
 mod prefs;
+pub mod recording;
 mod secure;
 
 use std::collections::HashMap;
@@ -53,8 +54,11 @@ pub struct AppState {
     pub prefs_path: PathBuf,
     pub shortcuts: Mutex<HashMap<String, String>>,
     pub shortcuts_path: PathBuf,
-    /// Last failed upload image, retained for "Retry Upload" (Swift: UploadService.failedCapture).
-    pub last_failed: Mutex<Option<image::RgbaImage>>,
+    /// Last failed upload (screenshot buffer or kept recording file), retained for
+    /// "Retry Upload" (Swift: UploadService.failedCapture).
+    pub last_failed: Mutex<Option<recording::FailedUpload>>,
+    /// In-flight screen recording, if any (owns the recording tray icon + poll tick).
+    pub recording: Mutex<Option<recording::Session>>,
     /// Mode + virtual-desktop origin for the overlay about to open — the overlay reads these
     /// via the `overlay_mode` command (query strings + init scripts didn't survive reliably).
     pub overlay_mode: Mutex<String>,
@@ -141,9 +145,22 @@ pub fn run() {
             commands::app_version,
             commands::check_for_updates,
             commands::install_update,
+            commands::begin_recording,
+            commands::pause_recording,
+            commands::resume_recording,
+            commands::stop_recording,
+            commands::cancel_recording,
+            commands::get_recording_status,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Abandon a live recording on quit: cancel natively (3 s watchdog) and
+            // delete the temp file so nothing leaks into the next session.
+            if let tauri::RunEvent::Exit = event {
+                recording::shutdown(app);
+            }
+        });
 }
 
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -173,6 +190,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         shortcuts: Mutex::new(shortcuts.clone()),
         shortcuts_path,
         last_failed: Mutex::new(None),
+        recording: Mutex::new(None),
         overlay_mode: Mutex::new(String::new()),
         overlay_origin: Mutex::new((0, 0)),
         pending_signin: Mutex::new(None),
@@ -204,6 +222,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     build_tray(app)?;
+
+    // Menu-event dispatch for the transient recording tray + stale-file sweep.
+    recording::init(&handle);
 
     for (mode, accel) in &shortcuts {
         if let Err(e) = register_shortcut(&handle, mode, accel) {
@@ -461,6 +482,12 @@ pub fn register_shortcut(app: &AppHandle, mode: &str, accel: &str) -> Result<(),
             }
         })
         .map_err(|e| e.to_string())
+}
+
+/// Kicks off a screen recording. Mirrors trigger_capture so future global
+/// shortcuts can map straight onto it.
+pub fn trigger_record(app: &AppHandle, mode: &str) -> Result<(), String> {
+    recording::begin(app, mode)
 }
 
 pub fn trigger_capture(app: &AppHandle, mode: &str) {

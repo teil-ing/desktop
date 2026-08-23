@@ -4,9 +4,9 @@
 
 import { listen } from "@tauri-apps/api/event";
 import * as ipc from "./ipc";
-import { el, relativeTime, formatBytes, editUrl, settingsUrl, formatShortcut } from "./dom";
+import { el, relativeTime, formatBytes, formatDuration, editUrl, settingsUrl, formatShortcut } from "./dom";
 import { icons } from "./icons";
-import type { ImageResponse, QuotaResponse, UploadFeedback } from "./types";
+import type { ImageResponse, QuotaResponse, RecordingStatus, UploadFeedback, UploadProgress } from "./types";
 
 type View = "loading" | "permission" | "onboarding" | "main";
 
@@ -37,6 +37,18 @@ const state = {
   confirmingDelete: null as string | null,
   /** Image id whose deletion is in flight. */
   deleting: null as string | null,
+  /** Screen-recording session state (Rust recording.rs; supported=false hides the UI). */
+  recording: {
+    supported: false,
+    phase: "idle",
+    mode: null,
+    elapsedMs: 0,
+    bytesWritten: 0,
+    uploadSent: null,
+    uploadTotal: null,
+  } as RecordingStatus,
+  /** Streaming video upload progress (recording or retry). */
+  uploadProgress: null as UploadProgress | null,
 };
 
 /**
@@ -81,6 +93,8 @@ async function loadShortcuts() {
 }
 
 async function boot() {
+  state.recording = await ipc.getRecordingStatus().catch(() => state.recording);
+
   // Permission gate first: on macOS a missing Screen Recording grant blocks the
   // whole app; on Windows the check always passes and this is a no-op.
   state.screenPermission = await ipc.checkScreenPermission().catch(() => true);
@@ -103,10 +117,33 @@ async function boot() {
 
   // Rust emits this whenever the tray popover is shown → refresh like showPopover() does.
   await listen("popover-shown", () => {
+    ipc.getRecordingStatus()
+      .then((r) => {
+        state.recording = r;
+        if (state.view === "main") render();
+      })
+      .catch(() => {});
     if (state.view === "main") {
       loadShortcuts();
       refreshAll();
+      armProcessingPoll();
     }
+  });
+
+  // Recording lifecycle (Rust recording.rs) — drives the banner + disabled rows.
+  await listen<RecordingStatus>("recording-state", (e) => {
+    const wasUploading = state.recording.phase === "uploading";
+    state.recording = e.payload;
+    if (state.recording.phase === "idle" && wasUploading) state.uploadProgress = null;
+    if (state.view === "main") render();
+  });
+
+  // Streaming video upload progress (recording finish or Retry Upload).
+  await listen<UploadProgress>("upload-progress", (e) => {
+    state.uploadProgress = e.payload;
+    // Update just the progress bar in place — a full render() per chunk would fight
+    // the delete-confirm state and thrash layout at up to 10 Hz.
+    updateUploadBanner();
   });
 
   // Background update probe (Rust: spawn_update_check) found a newer version.
@@ -121,9 +158,12 @@ async function boot() {
       state.uploadError = null;
     } else if (f.kind === "succeeded") {
       state.uploadError = null;
+      state.uploadProgress = null;
       refreshAll(); // new upload appears at the top (list prefers remote images)
+      armProcessingPoll(); // a fresh video shows "Processing…" until the poster exists
     } else if (f.kind === "failed") {
       state.uploadError = f.message;
+      state.uploadProgress = null;
     }
     if (state.view === "main") render();
   });
@@ -142,12 +182,53 @@ async function refreshAll() {
     ]);
     state.images = list.images;
     state.quota = quota;
+    if (anyVideoProcessing()) armProcessingPoll();
   } catch (err) {
     state.remoteError = String(err);
   } finally {
     state.loadingRemote = false;
     if (state.view === "main") render();
   }
+}
+
+// ---- Video processing poll ------------------------------------------------
+// A freshly uploaded video shows a placeholder until the server's media worker
+// generates the poster (streamStatus "ready"). Poll the list quietly while any
+// visible video is still processing, bounded by a deadline.
+
+let processingPoll: number | null = null;
+let processingDeadline = 0;
+
+function anyVideoProcessing(): boolean {
+  return state.images.some(
+    (i) => i.kind === "video" && i.streamStatus !== "ready" && i.streamStatus !== "failed",
+  );
+}
+
+function armProcessingPoll() {
+  processingDeadline = Date.now() + 10 * 60 * 1000;
+  if (processingPoll !== null) return;
+  processingPoll = window.setInterval(async () => {
+    if (Date.now() > processingDeadline || state.view !== "main") {
+      disarmProcessingPoll();
+      return;
+    }
+    if (document.hidden) return; // popover hidden — don't burn requests (best-effort)
+    try {
+      const list = await ipc.listImages(5, 0);
+      state.images = list.images;
+    } catch {
+      return;
+    }
+    if (!anyVideoProcessing()) disarmProcessingPoll();
+    // Quiet refresh: skip while a delete confirmation is open so it isn't lost.
+    if (state.view === "main" && state.confirmingDelete === null) render();
+  }, 5000);
+}
+
+function disarmProcessingPoll() {
+  if (processingPoll !== null) window.clearInterval(processingPoll);
+  processingPoll = null;
 }
 
 // ---- Render dispatch -----------------------------------------------------
@@ -321,7 +402,22 @@ function renderMain() {
     c.appendChild(el("div", { class: "divider" }));
   }
 
+  if (state.recording.phase !== "idle") {
+    c.appendChild(recordingBanner());
+    c.appendChild(el("div", { class: "divider" }));
+  } else if (state.uploadProgress) {
+    // Retry Upload of a kept recording — progress without a recording session.
+    const banner = el("div", { class: "rec-banner" });
+    banner.appendChild(uploadBannerLine());
+    c.appendChild(banner);
+    c.appendChild(el("div", { class: "divider" }));
+  }
+
   c.appendChild(captureSection());
+  if (state.recording.supported) {
+    c.appendChild(el("div", { class: "divider" }));
+    c.appendChild(recordSection());
+  }
   c.appendChild(el("div", { class: "divider" }));
   c.appendChild(historySection());
   c.appendChild(el("div", { class: "divider" }));
@@ -342,17 +438,123 @@ function captureSection() {
     ["Fullscreen", icons.fullscreen, "fullscreen", () => ipc.captureFullscreen()],
     ["Window", icons.window, "window", openWindowPicker],
   ];
+  const busy = state.recording.phase !== "idle";
   for (const [label, icon, mode, action] of modes) {
-    const row = el("div", { class: "row capture-row" });
+    const row = el("div", { class: busy ? "row capture-row disabled" : "row capture-row" });
     row.appendChild(el("div", { class: "label grow", html: `${wrapIcon(icon)}<span>${label}</span>` }));
     const accel = state.shortcuts[mode];
     if (accel) row.appendChild(el("kbd", { class: "kbd", text: formatShortcut(accel) }));
     // Don't hidePopover() here — the capture command hides the popover itself and
     // waits for it to leave the screen before freezing the screenshot.
-    row.onclick = () => action();
+    if (!busy) row.onclick = () => action();
     s.appendChild(row);
   }
   return s;
+}
+
+// ---- Recording -----------------------------------------------------------
+
+function recordSection() {
+  const s = el("div", { class: "section" });
+  s.appendChild(el("div", { class: "section-label", text: "Record" }));
+  const busy = state.recording.phase !== "idle";
+  const modes: [string, string, "region" | "fullscreen" | "window"][] = [
+    ["Region", icons.recordRegion, "region"],
+    ["Fullscreen", icons.recordFullscreen, "fullscreen"],
+    ["Window", icons.recordWindow, "window"],
+  ];
+  for (const [label, icon, mode] of modes) {
+    const row = el("div", { class: busy ? "row capture-row disabled" : "row capture-row" });
+    row.appendChild(el("div", { class: "label grow", html: `${wrapIcon(icon)}<span>${label}</span>` }));
+    // Rust hides the popover itself before showing the selection overlay.
+    if (!busy) {
+      row.onclick = () =>
+        ipc.beginRecording(mode).catch((err) => {
+          state.uploadError = String(err).replace(/^Error:\s*/, "");
+          render();
+        });
+    }
+    s.appendChild(row);
+  }
+  return s;
+}
+
+/** Live banner while a recording session exists: timer + Pause/Stop/Discard, or
+ *  saving/upload progress. The tray icon offers the same controls. */
+function recordingBanner() {
+  const r = state.recording;
+  const banner = el("div", { class: "rec-banner" });
+
+  if (r.phase === "stopping") {
+    banner.appendChild(
+      el("div", { class: "line", html: `<span class="spinner"></span><span>Saving recording…</span>` }),
+    );
+    return banner;
+  }
+
+  if (r.phase === "uploading") {
+    banner.appendChild(uploadBannerLine());
+    return banner;
+  }
+
+  const paused = r.phase === "paused";
+  const starting = r.phase === "starting";
+  const label = starting ? "Starting…" : paused ? "Paused" : "Recording";
+  const time = formatDuration(r.elapsedMs);
+  banner.appendChild(
+    el("div", {
+      class: "line",
+      html: `<span class="rec-dot${paused ? " paused" : ""}"></span><span class="rec-time">${time}</span><span class="rec-label">${label}</span>`,
+    }),
+  );
+
+  if (!starting) {
+    const controls = el("div", { class: "rec-controls" });
+
+    const pauseBtn = el("button", {
+      class: "btn-sm",
+      html: paused ? `${icons.play}<span>Resume</span>` : `${icons.pause}<span>Pause</span>`,
+    });
+    pauseBtn.onclick = () => (paused ? ipc.resumeRecording() : ipc.pauseRecording()).catch(() => {});
+    controls.appendChild(pauseBtn);
+
+    const stopBtn = el("button", { class: "btn-sm solid", html: `${icons.stop}<span>Stop</span>` });
+    stopBtn.onclick = () => ipc.stopRecording().catch(() => {});
+    controls.appendChild(stopBtn);
+
+    const discard = el("button", { class: "btn-sm", html: `${icons.trash}<span>Discard</span>` });
+    discard.onclick = () => ipc.cancelRecording().catch(() => {});
+    controls.appendChild(discard);
+
+    banner.appendChild(controls);
+  }
+  return banner;
+}
+
+/** The "Uploading recording…" line + progress bar; updated in place on progress events. */
+function uploadBannerLine() {
+  const wrap = el("div", { class: "rec-upload", attrs: { id: "rec-upload" } });
+  const p = state.uploadProgress;
+  const pct = p && p.total > 0 ? Math.floor((p.sent / p.total) * 100) : 0;
+  const detail = p ? `${pct}% · ${formatBytes(p.sent)} of ${formatBytes(p.total)}` : "";
+  wrap.appendChild(
+    el("div", { class: "line", html: `<span class="spinner"></span><span>Uploading recording…</span><span class="rec-upload-detail">${detail}</span>` }),
+  );
+  const bar = el("div", { class: "bar" });
+  bar.appendChild(el("div", { class: "bar-fill", attrs: { style: `width:${pct}%` } }));
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+/** Patch the upload banner in place (called up to ~10 Hz from upload-progress). */
+function updateUploadBanner() {
+  const existing = document.getElementById("rec-upload");
+  if (!existing) {
+    const uploading = state.recording.phase === "uploading" || state.uploadProgress !== null;
+    if (state.view === "main" && uploading) render();
+    return;
+  }
+  existing.replaceWith(uploadBannerLine());
 }
 
 function openWindowPicker() {
@@ -363,7 +565,7 @@ function openWindowPicker() {
 function historySection() {
   const s = el("div", { class: "section" });
   const header = el("div", { class: "history-header" });
-  header.appendChild(el("span", { text: "Images" }));
+  header.appendChild(el("span", { text: "Recent" }));
   if (state.loadingRemote) header.appendChild(el("span", { class: "spinner" }));
   header.appendChild(el("span", { class: "grow" }));
 
@@ -388,13 +590,29 @@ function historySection() {
 }
 
 function historyRow(img: ImageResponse) {
-  const shareUrl = `https://teil.ing/i/${img.slug}`;
+  const shareUrl = `https://teil.ing/${img.kind === "video" ? "v" : "i"}/${img.slug}`;
   const confirming = state.confirmingDelete === img.id;
+  const isVideo = img.kind === "video";
+  const videoReady = img.streamStatus === "ready";
   const row = el("div", { class: confirming ? "history-row confirming" : "history-row" });
 
-  const thumb = el("img", { class: "thumb" }) as HTMLImageElement;
-  if (img.thumbnailUrl) thumb.src = img.thumbnailUrl;
-  row.appendChild(thumb);
+  const thumbWrap = el("div", { class: "thumb-wrap" });
+  if (img.thumbnailUrl) {
+    const thumb = el("img", { class: "thumb" }) as HTMLImageElement;
+    thumb.src = img.thumbnailUrl;
+    thumbWrap.appendChild(thumb);
+    if (isVideo) thumbWrap.appendChild(el("span", { class: "play-badge", html: icons.play }));
+  } else {
+    // Video poster not generated yet (or an image without a thumb) — placeholder.
+    thumbWrap.appendChild(
+      el("div", {
+        class: "thumb placeholder",
+        html: isVideo ? icons.film : icons.clock,
+        attrs: isVideo ? { title: "Processing…" } : {},
+      }),
+    );
+  }
+  row.appendChild(thumbWrap);
 
   // Inline delete confirmation replaces the row's meta + actions (Swift-less
   // equivalent of a destructive confirm sheet, kept inside the menu).
@@ -402,7 +620,9 @@ function historyRow(img: ImageResponse) {
     const busy = state.deleting === img.id;
 
     const meta = el("div", { class: "confirm-meta" });
-    meta.appendChild(el("div", { class: "title", html: `${icons.trash}<span>Delete image?</span>` }));
+    meta.appendChild(
+      el("div", { class: "title", html: `${icons.trash}<span>Delete ${isVideo ? "video" : "image"}?</span>` }),
+    );
     meta.appendChild(el("div", { class: "sub", text: "Can't be undone." }));
     row.appendChild(meta);
 
@@ -446,9 +666,20 @@ function historyRow(img: ImageResponse) {
   }
 
   const meta = el("div", { class: "meta" });
-  const badges = [img.isPrivate ? wrapIcon(icons.lock) : "", img.hasPassword ? wrapIcon(icons.key) : ""].join("");
+  const durationChip =
+    isVideo && img.durationMs !== null ? `<span class="chip dur">${formatDuration(img.durationMs)}</span>` : "";
+  const badges = [durationChip, img.isPrivate ? wrapIcon(icons.lock) : "", img.hasPassword ? wrapIcon(icons.key) : ""].join("");
   meta.appendChild(el("div", { class: "time", html: `<span>${relativeTime(img.createdAt)}</span>${badges}` }));
-  meta.appendChild(el("div", { class: "views", text: `${img.viewCount} ${img.viewCount === 1 ? "view" : "views"}` }));
+  if (isVideo && !videoReady) {
+    meta.appendChild(
+      el("div", {
+        class: "views",
+        text: img.streamStatus === "failed" ? "Processing failed" : "Processing…",
+      }),
+    );
+  } else {
+    meta.appendChild(el("div", { class: "views", text: `${img.viewCount} ${img.viewCount === 1 ? "view" : "views"}` }));
+  }
   row.appendChild(meta);
 
   // Edit (web) + Copy + Download + Settings + Delete, packed into one dense
@@ -463,9 +694,12 @@ function historyRow(img: ImageResponse) {
   // a click inside the toolbar is never a row click.
   actions.onclick = (e) => e.stopPropagation();
 
-  const edit = el("button", { class: "icon-btn", html: icons.edit, attrs: { title: "Edit on teil.ing" } });
-  edit.onclick = () => ipc.openExternal(editUrl(shareUrl));
-  actions.appendChild(edit);
+  // No web editor for videos, so the Edit shortcut is image-only.
+  if (!isVideo) {
+    const edit = el("button", { class: "icon-btn", html: icons.edit, attrs: { title: "Edit on teil.ing" } });
+    edit.onclick = () => ipc.openExternal(editUrl(shareUrl));
+    actions.appendChild(edit);
+  }
 
   const copy = el("button", { class: "icon-btn", html: icons.copy, attrs: { title: "Copy URL" } });
   copy.onclick = async () => {
@@ -483,7 +717,9 @@ function historyRow(img: ImageResponse) {
   // Saves the original into the download folder (Settings → General). Once saved,
   // the button turns into a reveal-in-Finder shortcut for the file it just wrote —
   // it reverts to "Save to disk" on the next refresh, which every popover open does.
+  // Videos have no downloadable original (the stream host owns the bytes) — hide Save.
   const download = el("button", { class: "icon-btn", html: icons.save, attrs: { title: "Save to disk" } }) as HTMLButtonElement;
+  if (isVideo) download.style.display = "none";
   download.onclick = async () => {
     download.disabled = true;
     download.innerHTML = '<span class="spinner"></span>';
@@ -513,7 +749,7 @@ function historyRow(img: ImageResponse) {
   settings.onclick = () => ipc.openExternal(settingsUrl(shareUrl));
   actions.appendChild(settings);
 
-  const del = el("button", { class: "icon-btn del", html: icons.trash, attrs: { title: "Delete image" } });
+  const del = el("button", { class: "icon-btn del", html: icons.trash, attrs: { title: isVideo ? "Delete video" : "Delete image" } });
   del.onclick = () => {
     state.confirmingDelete = img.id;
     render();

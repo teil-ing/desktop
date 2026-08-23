@@ -12,6 +12,8 @@ publish = false
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Window enumeration + occlusion-free per-window pixel grabs.
 xcap = "0.9"
+# Windows.Graphics.Capture + Media Foundation H.264 recording.
+windows-capture = "2"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

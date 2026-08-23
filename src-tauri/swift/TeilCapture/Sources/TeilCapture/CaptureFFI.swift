@@ -17,9 +17,9 @@ import UniformTypeIdentifiers
 //       session was already in progress. No buffer, no error.
 //   2 — error: *outErr holds a message (free with teil_string_free)
 
-private let teilOK: Int32 = 0
-private let teilCancelled: Int32 = 1
-private let teilError: Int32 = 2
+let teilOK: Int32 = 0
+let teilCancelled: Int32 = 1
+let teilError: Int32 = 2
 
 // MARK: - Capture outcome
 
@@ -36,7 +36,7 @@ private enum Outcome: Sendable {
 private let sessionLock = NSLock()
 private nonisolated(unsafe) var sessionActive = false
 
-private func beginSession() -> Bool {
+func beginSession() -> Bool {
     sessionLock.lock()
     defer { sessionLock.unlock() }
     if sessionActive { return false }
@@ -44,7 +44,7 @@ private func beginSession() -> Bool {
     return true
 }
 
-private func endSession() {
+func endSession() {
     sessionLock.lock()
     sessionActive = false
     sessionLock.unlock()
@@ -52,14 +52,14 @@ private func endSession() {
 
 // MARK: - Async → blocking bridge
 
-private final class ResultBox<T>: @unchecked Sendable {
+final class ResultBox<T>: @unchecked Sendable {
     var value: T?
 }
 
 /// Runs an async body on the concurrency pool and blocks the calling (non-main)
 /// thread until it completes. MainActor work inside the body is serviced by the
 /// host app's run loop, which Tauri keeps running on the real main thread.
-private func runBlocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
+func runBlocking<T>(_ body: @escaping @Sendable () async -> T) -> T {
     let box = ResultBox<T>()
     let semaphore = DispatchSemaphore(value: 0)
     Task.detached(priority: .userInitiated) {

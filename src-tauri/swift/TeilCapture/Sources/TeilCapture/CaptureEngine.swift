@@ -31,7 +31,7 @@ enum CaptureEngineError: LocalizedError {
 // MARK: - ScreenInfo
 // A Sendable snapshot of NSScreen data needed for capture configuration.
 
-private struct ScreenInfo: Sendable {
+struct ScreenInfo: Sendable {
     let frame: CGRect
     let backingScaleFactor: CGFloat
 }
@@ -201,13 +201,13 @@ actor CaptureEngine {
     /// The conversion uses the primary display height as the reference point since both
     /// coordinate systems share the same origin horizontally but are Y-flipped relative
     /// to the primary display's top/bottom edge.
-    private func appKitRectToCG(_ appKitRect: CGRect, primaryHeight: CGFloat) -> CGRect {
+    func appKitRectToCG(_ appKitRect: CGRect, primaryHeight: CGFloat) -> CGRect {
         let cgY = primaryHeight - appKitRect.maxY
         return CGRect(x: appKitRect.origin.x, y: cgY, width: appKitRect.width, height: appKitRect.height)
     }
 
     /// Builds an SCContentFilter for the given display, excluding the app's own bundle.
-    private func buildFilter(for display: SCDisplay) async throws -> SCContentFilter {
+    func buildFilter(for display: SCDisplay) async throws -> SCContentFilter {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         let excluded = content.applications.filter {
             $0.bundleIdentifier == Bundle.main.bundleIdentifier
@@ -254,7 +254,7 @@ actor CaptureEngine {
     /// AppKit coordinates (bottom-left, Y-up) while SCDisplay uses CG coordinates
     /// (top-left, Y-down). The x-origin is the same in both systems; the y-origin differs
     /// for vertically-offset displays.
-    private func findDisplayByFrame(_ screenFrame: CGRect) async throws -> SCDisplay {
+    func findDisplayByFrame(_ screenFrame: CGRect) async throws -> SCDisplay {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: {
             abs($0.frame.origin.x - screenFrame.origin.x) < 1.0
@@ -272,7 +272,7 @@ actor CaptureEngine {
     /// Only Sendable values (CGRect, CGFloat) are returned from the MainActor closure.
     ///
     /// - Returns: A tuple of (SCDisplay, ScreenInfo) for the display under the cursor.
-    private func findCurrentDisplay() async throws -> (SCDisplay, ScreenInfo) {
+    func findCurrentDisplay() async throws -> (SCDisplay, ScreenInfo) {
         // Collect NSScreen data on MainActor — NSScreen is not Sendable
         // Use NSMouseInRect for correct AppKit coordinate hit-testing (CGRect.contains
         // is exclusive on maxX/maxY and fails at screen boundaries)

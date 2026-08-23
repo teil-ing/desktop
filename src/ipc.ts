@@ -8,6 +8,8 @@ import type {
   ImageUpdateRequest,
   Prefs,
   QuotaResponse,
+  RecordMode,
+  RecordingStatus,
   Region,
   WindowInfo,
 } from "./types";
@@ -74,6 +76,26 @@ export const captureWindow = (windowId: number) =>
 /** Called by the overlay once the user finishes dragging (rect in virtual coords). */
 export const finishRegionCapture = (region: Region | null) =>
   invoke<void>("finish_region_capture", { region });
+
+// ---- Screen recording ----------------------------------------------------
+// macOS only in v1 — getRecordingStatus().supported gates the UI elsewhere.
+
+/** Start a recording (native selection overlay first for region/window). */
+export const beginRecording = (mode: RecordMode) =>
+  invoke<void>("begin_recording", { mode });
+
+export const pauseRecording = () => invoke<void>("pause_recording");
+
+export const resumeRecording = () => invoke<void>("resume_recording");
+
+/** Stop, finalize and upload the recording. */
+export const stopRecording = () => invoke<void>("stop_recording");
+
+/** Discard the recording — nothing is uploaded. */
+export const cancelRecording = () => invoke<void>("cancel_recording");
+
+export const getRecordingStatus = () =>
+  invoke<RecordingStatus>("get_recording_status");
 
 // ---- Remote image API ----------------------------------------------------
 

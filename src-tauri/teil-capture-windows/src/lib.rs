@@ -14,6 +14,10 @@
 
 #[cfg(windows)]
 mod overlay;
+#[cfg(windows)]
+mod border;
+#[cfg(windows)]
+pub mod recorder;
 
 /// Blocking interactive capture. Mode: "region" | "window" | "fullscreen".
 /// `Ok(Some(png))` on capture, `Ok(None)` on user cancel, `Err` on failure.
@@ -109,7 +113,7 @@ fn capture_window_interactive() -> Result<Option<Vec<u8>>, String> {
 /// windows. Returns the xcap handles (for the final grab) plus their global rects
 /// (for hover hit-testing in the overlay).
 #[cfg(windows)]
-fn pickable_windows() -> Result<(Vec<xcap::Window>, Vec<overlay::Rect>), String> {
+pub(crate) fn pickable_windows() -> Result<(Vec<xcap::Window>, Vec<overlay::Rect>), String> {
     let own_pid = std::process::id();
     let mut wins = Vec::new();
     let mut rects = Vec::new();
