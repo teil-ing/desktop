@@ -409,8 +409,15 @@ pub async fn stop(app: AppHandle) -> Result<(), String> {
     if !begin_stopping(&app) {
         return Err("No active recording to stop.".into());
     }
+    // Feedback BEFORE the blocking finalize: record_stop can take seconds
+    // (Windows joins the capture thread and drains the Media Foundation
+    // pipeline) — without this event the popover kept showing a live Stop
+    // button, which read as "the button does nothing, press it again".
+    emit_state(&app);
     if let Some(tray) = app.tray_by_id("recording") {
         let _ = tray.set_title(Some("Saving…"));
+        // set_title is a no-op on Windows — the tooltip is the feedback there.
+        let _ = tray.set_tooltip(Some("Saving recording…"));
     }
     let result = blocking(native::record_stop).await;
     remove_tray(&app);
@@ -434,6 +441,7 @@ pub async fn cancel(app: AppHandle) -> Result<(), String> {
     if !begin_stopping(&app) {
         return Err("No active recording to discard.".into());
     }
+    emit_state(&app);
     let _ = blocking(|| {
         native::record_cancel();
         Ok::<(), String>(())
