@@ -92,3 +92,9 @@ strip = true
 # fail the whole video (status 5). Vendored under src-tauri/vendor.
 [patch.crates-io]
 windows-capture = { path = "vendor/windows-capture" }
+# tray-icon 0.24.2 + upstream PR #365 (shipped in 0.25.1): macOS 27 swallows
+# left-clicks on a status item that has a menu permanently attached, so the
+# popover never opened — only the right-click "Quit" menu appeared. The fix
+# attaches the NSMenu only while it is being presented. Tauri 2.x still pins
+# tray-icon 0.24, so drop this once it depends on tray-icon >= 0.25.1.
+tray-icon = { path = "vendor/tray-icon" }
